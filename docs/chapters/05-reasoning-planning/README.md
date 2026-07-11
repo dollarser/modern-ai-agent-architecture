@@ -71,32 +71,35 @@
 ### 2.2 推理策略对比
 
 ```mermaid
-graph TD
-    subgraph "Chain-of-Thought"
-        A1[问题] --> A2[步骤1: 思考]
-        A2 --> A3[步骤2: 思考]
-        A3 --> A4[步骤3: 思考]
-        A4 --> A5[答案]
+flowchart LR
+    subgraph CoT["Chain-of-Thought"]
+        direction TB
+        A1[问题] --> A2[逐步思考]
+        A2 --> A3[形成结论]
+        A3 --> A4[答案]
     end
 
-    subgraph "ReAct"
+    subgraph ReAct["ReAct"]
+        direction TB
         B1[问题] --> B2[Thought]
         B2 --> B3[Action]
         B3 --> B4[Observation]
-        B4 --> B5[Thought]
-        B5 --> B6[Action]
-        B6 --> B7[Observation]
-        B7 --> B8[答案]
+        B4 --> B5{信息充分?}
+        B5 -->|否| B2
+        B5 -->|是| B6[答案]
     end
 
-    subgraph "Plan-and-Execute"
-        C1[问题] --> C2[Plan: 制定计划]
-        C2 --> C3[Execute: 步骤1]
-        C3 --> C4[Execute: 步骤2]
-        C4 --> C5[Execute: 步骤3]
-        C5 --> C6[Verify: 验证结果]
-        C6 --> C7[答案]
+    subgraph PE["Plan-and-Execute"]
+        direction TB
+        C1[问题] --> C2[Plan<br/>制定计划]
+        C2 --> C3[Execute<br/>逐步执行]
+        C3 --> C4{验证通过?}
+        C4 -->|否，调整计划| C2
+        C4 -->|是| C5[答案]
     end
+
+    A1 ~~~ B1
+    B1 ~~~ C1
 ```
 
 > **图 5-1：** 三种推理策略对比。CoT 是线性思考链，ReAct 是思考与行动交替，Plan-and-Execute 是先规划再执行。
@@ -373,18 +376,32 @@ class TreeOfThoughts:
 ### 4.1 Plan-and-Execute 模式
 
 ```mermaid
-flowchart TD
-    Task[接收任务] --> Analyze[分析任务需求]
-    Analyze --> Decompose[分解为子任务]
-    Decompose --> Schedule[制定执行顺序]
-    Schedule --> Execute[逐步执行]
-    Execute --> Check{执行结果<br/>是否符合预期?}
-    Check -->|是| Next{还有<br/>子任务?}
-    Check -->|否| Replan[调整计划]
-    Replan --> Schedule
-    Next -->|是| Execute
-    Next -->|否| Verify[验证最终结果]
-    Verify --> Done[输出结果]
+flowchart LR
+    subgraph Planning["规划阶段"]
+        direction TB
+        Task[接收任务] --> Analyze[分析任务需求]
+        Analyze --> Decompose[分解为子任务]
+        Decompose --> Schedule[制定执行顺序]
+    end
+
+    subgraph Running["执行循环"]
+        direction TB
+        Select[选择下一子任务] --> Execute[执行子任务]
+        Execute --> Check{结果符合预期?}
+        Check -->|否| Replan[调整剩余计划]
+        Replan --> Select
+        Check -->|是| Complete[记录步骤结果]
+        Complete --> Next{还有子任务?}
+        Next -->|是| Select
+    end
+
+    subgraph Finish["收尾阶段"]
+        direction TB
+        Verify[验证最终结果] --> Done[输出结果]
+    end
+
+    Schedule --> Select
+    Next -->|否| Verify
 ```
 
 > **图 5-3：** Plan-and-Execute 流程。任务分解 → 制定顺序 → 逐步执行 → 动态调整 → 验证结果。
