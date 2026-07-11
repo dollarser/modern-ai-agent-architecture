@@ -1,0 +1,13 @@
+{
+  "name": "agent-mvp-minimal",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A runnable minimal vertical slice for chapter 7",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/main.js"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0"
+  }
+}

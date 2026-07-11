@@ -1,0 +1,14 @@
+{
+  "name": "mcp-server",
+  "version": "1.0.0",
+  "description": "mcp-server - TypeScript example",
+  "main": "dist/main.js",
+  "scripts": {
+    "start": "tsx main.ts",
+    "build": "tsc"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "tsx": "^4.16.0"
+  }
+}

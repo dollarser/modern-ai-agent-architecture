@@ -1,0 +1,6 @@
+# Hello Agent - Python 实现
+
+# 无外部依赖，纯标准库实现
+
+# requirements.txt 内容：
+# （无依赖）

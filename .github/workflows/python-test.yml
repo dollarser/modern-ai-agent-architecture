@@ -1,0 +1,53 @@
+name: Python Test
+
+on:
+  push:
+    paths:
+      - 'examples/**/*.py'
+      - 'examples/**/requirements.txt'
+  pull_request:
+    paths:
+      - 'examples/**/*.py'
+      - 'examples/**/requirements.txt'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.11', '3.12']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Find and test all Python examples
+        run: |
+          for example_dir in examples/*/python/; do
+            if [ -f "$example_dir/requirements.txt" ]; then
+              echo "=== Testing $example_dir ==="
+              pip install -r "$example_dir/requirements.txt"
+            fi
+            if [ -f "$example_dir/main.py" ]; then
+              python "$example_dir/main.py"
+            fi
+            # Run all .py files that are test files
+            for test_file in "$example_dir"test_*.py; do
+              if [ -f "$test_file" ]; then
+                python "$test_file"
+              fi
+            done
+          done
+
+      - name: Verify all examples have README
+        run: |
+          for example_dir in examples/*/; do
+            if [ ! -f "$example_dir/README.md" ]; then
+              echo "ERROR: $example_dir is missing README.md"
+              exit 1
+            fi
+          done

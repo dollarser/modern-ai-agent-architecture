@@ -1,0 +1,35 @@
+name: Mermaid Check
+
+on:
+  push:
+    paths:
+      - '**/*.md'
+      - '**/*.mermaid'
+  pull_request:
+    paths:
+      - '**/*.md'
+      - '**/*.mermaid'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install mermaid-cli
+        run: npm install -g @mermaid-js/mermaid-cli
+
+      - name: Extract Mermaid diagrams
+        run: |
+          python scripts/extract_mermaid.py . /tmp/mermaid-snippets
+
+      - name: Validate Mermaid syntax
+        run: |
+          for diagram in /tmp/mermaid-snippets/*.mmd; do
+            mmdc -i "$diagram" -o "$diagram.svg"
+          done
