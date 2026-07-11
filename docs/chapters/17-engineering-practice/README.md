@@ -72,7 +72,7 @@ agent-project/
 
 import os
 import yaml
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 
@@ -98,7 +98,7 @@ class AgentDeployConfig:
     tool_cache_size: int = 128
 
     # Security
-    allowed_tools: list[str] = None
+    allowed_tools: list[str] = field(default_factory=list)
     require_user_approval: bool = True
     sandbox_enabled: bool = True
 
@@ -134,147 +134,83 @@ class ConfigLoader:
 
 ### 2.2 单元测试
 
+单元测试应针对稳定契约，而不是复制某一章已经淘汰的组合类。第 7 章最小示例使用标准库 `unittest`，测试直接导入同目录的真实实现：
+
 ```python
-"""
-Agent 单元测试
-"""
+import unittest
 
-import pytest
-from unittest.mock import AsyncMock, MagicMock
+from main import MinimalAgent, TaskState, ToolCall, ToolDispatcher
 
 
-class TestAgentCore:
-    """测试 Agent 核心逻辑"""
+class MinimalAgentTest(unittest.TestCase):
+    def test_success_contract(self):
+        state = MinimalAgent().run("查找数据库连接配置")
+        self.assertTrue(state.finished)
+        self.assertIsNone(state.error)
+        self.assertEqual(state.step_count, 2)
 
-    @pytest.fixture
-    def agent(self):
-        return AgentMVP(AgentConfig(max_steps=5))
+    def test_limit_is_not_success(self):
+        state = MinimalAgent(max_steps=1).run("查找数据库连接配置")
+        self.assertFalse(state.finished)
+        self.assertEqual(state.error, "达到最大步数: 1")
 
-    def test_initialization(self, agent):
-        assert agent.state == AgentState.LOADING
-        assert len(agent.tools.list_all()) > 0
-
-    def test_tool_registration(self, agent):
-        tools = agent.tools.list_all()
-        assert "read_file" in tools
-        assert "write_file" in tools
-
-
-class TestToolExecution:
-    """测试 Tool 执行"""
-
-    @pytest.fixture
-    def registry(self):
-        reg = ToolRegistry()
-        reg.register(Tool(
-            name="test_tool",
-            description="测试工具",
-            parameters={"type": "object", "properties": {"value": {"type": "string"}}, "required": ["value"]},
-            handler=lambda value: {"success": True, "value": value}
-        ))
-        return reg
-
-    def test_execute_success(self, registry):
-        result = registry.execute("test_tool", {"value": "hello"})
-        assert result["success"] is True
-        assert result["value"] == "hello"
-
-    def test_execute_not_found(self, registry):
-        result = registry.execute("nonexistent", {})
-        assert result["success"] is False
-
-
-class TestMemoryOperations:
-    """测试 Memory 操作"""
-
-    @pytest.fixture
-    def memory(self):
-        return Memory(short_term_size=10)
-
-    def test_add_and_retrieve(self, memory):
-        memory.add("user", "test message")
-        context = memory.get_context()
-        assert "test message" in context
-
-    def test_save_and_recall(self, memory):
-        memory.save("key1", "value1")
-        assert memory.recall("key1") == "value1"
-
-    def test_search(self, memory):
-        memory.save("python", "Python 异步编程指南")
-        memory.save("js", "JavaScript 教程")
-        results = memory.search("Python")
-        assert len(results) > 0
-        assert "异步编程" in results[0]
-
-
-class TestHooks:
-    """测试 Hook 系统"""
-
-    @pytest.fixture
-    def hooks(self):
-        return HookSystem()
-
-    def test_register_and_trigger(self, hooks):
-        triggered = []
-        hooks.on("before_reasoning", lambda *args: triggered.append(True))
-        hooks.trigger("before_reasoning", None)
-        assert len(triggered) == 1
-
-    def test_hook_error_isolation(self, hooks):
-        def bad_hook(*args):
-            raise RuntimeError("test error")
-        hooks.on("before_reasoning", bad_hook)
-        # 不应抛出异常
-        hooks.trigger("before_reasoning", None)
+    def test_unknown_tool_is_structured_failure(self):
+        result = ToolDispatcher().execute(
+            ToolCall("missing_tool", {}), TaskState(task="test")
+        )
+        self.assertFalse(result["ok"])
 ```
+
+对应的唯一事实来源是 `examples/agent-mvp-minimal/python/test_main.py`。Memory、Hooks 和 Tool Registry 应分别测试各章定义的接口，不要为了测试方便重新创造一个同时拥有所有组件的旧版 `AgentMVP`。
 
 ### 2.3 集成测试
 
+集成测试关注跨组件契约和状态迁移。第 16 章可运行示例覆盖中断后由新实例恢复，以及重试耗尽不得误报成功：
+
 ```python
-class TestAgentIntegration:
-    """Agent 集成测试"""
+import asyncio
+import tempfile
+from pathlib import Path
 
-    @pytest.mark.asyncio
-    async def test_full_loop(self):
-        """测试完整 Agent 循环"""
-        agent = AgentMVP(AgentConfig(max_steps=3))
-        result = await agent.run("搜索代码")
-        assert result["success"] is True
-        assert result["steps"] > 0
+from main import AgentConfig, EnhancedAgent
 
-    @pytest.mark.asyncio
-    async def test_tool_chain(self):
-        """测试 Tool 链式调用"""
-        agent = AgentMVP(AgentConfig(max_steps=5))
-        # 先搜索，再读取
-        result = await agent.run("搜索并读取 main.py")
-        assert result["success"] is True
 
-    @pytest.mark.asyncio
-    async def test_error_recovery(self):
-        """测试错误恢复"""
-        registry = ToolRegistry()
-        call_count = 0
+def test_checkpoint_resume():
+    with tempfile.TemporaryDirectory() as directory:
+        checkpoint = Path(directory) / "cp.json"
+        task = "查找数据库配置"
 
-        def flaky_tool(**kwargs):
-            nonlocal call_count
-            call_count += 1
-            if call_count < 3:
-                raise ConnectionError("模拟网络错误")
-            return {"success": True}
-
-        registry.register(Tool(
-            name="flaky", description="不稳定工具",
-            parameters={"type": "object", "properties": {}},
-            handler=flaky_tool
-        ))
-        # 应该通过重试成功
-        result = await ResilientExecutor(max_retries=3).execute(
-            "flaky", {}, registry
+        first = asyncio.run(EnhancedAgent(
+            checkpoint,
+            AgentConfig(interrupt_after_steps=1),
+        ).run(task, "session-1"))
+        second = asyncio.run(
+            EnhancedAgent(checkpoint).run(task, "session-1")
         )
-        assert result["success"] is True
-        assert call_count == 3
+
+        assert first["status"] == "interrupted"
+        assert second["success"] is True
+        assert second["resumed"] is True
+```
+
+对应的完整测试位于 `examples/enhanced-agent/python/test_main.py` 和 `examples/enhanced-agent/typescript/test.ts`。测试层次建议如下：
+
+| 层次 | 隔离边界 | 重点断言 |
+|------|----------|----------|
+| Unit | Adapter、Planner、Tool、Policy、序列化器 | schema、纯函数结果、拒绝规则、错误映射 |
+| Integration | Runtime + Registry + Checkpoint Store | 状态迁移、恢复位置、依赖顺序、幂等键 |
+| E2E | 固定模型版本 + 沙箱 + 测试外部系统 | 最终结果、轨迹约束、权限、成本与延迟预算 |
+
+运行仓库中的真实契约测试：
+
+```bash
+python -m unittest discover -s examples/agent-mvp-minimal/python -p 'test_*.py' -v
+python -m unittest discover -s examples/runtime/python -p 'test_*.py' -v
+python -m unittest discover -s examples/hooks/python -p 'test_*.py' -v
+python -m unittest discover -s examples/enhanced-agent/python -p 'test_*.py' -v
+npm --prefix examples/runtime/typescript test
+npm --prefix examples/hooks/typescript test
+npm --prefix examples/enhanced-agent/typescript test
 ```
 
 ---
@@ -312,7 +248,7 @@ class PermissionSystem:
         """检查角色是否有权限使用 Tool"""
         required = self._tool_permissions.get(tool)
         if not required:
-            return True  # 无权限要求的 Tool 默认允许
+            return False  # 未注册策略的 Tool 默认拒绝
         return required in self._permissions.get(role, set())
 
     def create_permission_hook(self, role: str):
@@ -324,6 +260,8 @@ class PermissionSystem:
         return hook
 ```
 
+权限表采用 fail-closed：Tool 必须先注册所需权限，再由角色显式获得该权限。确需匿名访问的只读 Tool，也应注册明确的 `public` 策略，而不是依靠“没有配置即允许”。
+
 ### 3.3 沙箱执行
 
 ```python
@@ -333,8 +271,13 @@ class SandboxExecutor:
     def __init__(self, allowed_paths: list[str] = None,
                  allowed_commands: list[str] = None,
                  max_file_size: int = 10 * 1024 * 1024):
-        self.allowed_paths = allowed_paths or ["/tmp", "./workspace"]
-        self.allowed_commands = allowed_commands or ["ls", "cat", "grep", "find"]
+        self.allowed_paths = (
+            allowed_paths if allowed_paths is not None else ["/tmp", "./workspace"]
+        )
+        self.allowed_commands = (
+            allowed_commands if allowed_commands is not None
+            else ["ls", "cat", "grep", "find"]
+        )
         self.max_file_size = max_file_size
 
     def validate_path(self, path: str) -> bool:

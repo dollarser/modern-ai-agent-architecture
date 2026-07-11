@@ -19,6 +19,75 @@ interface ToolResult {
   [key: string]: unknown;
 }
 
+function safeCalculate(expression: string): number {
+  if (expression.length > 128) throw new Error("表达式过长");
+  const compact = expression.replace(/\s/g, "");
+  const tokens = compact.match(/\d+(?:\.\d+)?|\*\*|[()+\-*/%]/g) ?? [];
+  if (tokens.join("") !== compact || tokens.length > 32) {
+    throw new Error("表达式包含不允许的字符或过于复杂");
+  }
+
+  let index = 0;
+  const peek = () => tokens[index];
+  const take = () => tokens[index++];
+
+  const parsePrimary = (): number => {
+    if (peek() === "(") {
+      take();
+      const value = parseExpression();
+      if (take() !== ")") throw new Error("括号不匹配");
+      return value;
+    }
+    const token = take();
+    if (!token || !/^\d+(?:\.\d+)?$/.test(token)) throw new Error("需要数字");
+    return Number(token);
+  };
+
+  const parsePower = (): number => {
+    const left = parsePrimary();
+    if (peek() !== "**") return left;
+    take();
+    const exponent = parseUnary();
+    if (Math.abs(exponent) > 10) throw new Error("指数绝对值不能超过 10");
+    return left ** exponent;
+  };
+
+  const parseUnary = (): number => {
+    if (peek() === "+") { take(); return parseUnary(); }
+    if (peek() === "-") { take(); return -parseUnary(); }
+    return parsePower();
+  };
+
+  const parseTerm = (): number => {
+    let value = parseUnary();
+    while (["*", "/", "%"].includes(peek())) {
+      const operator = take();
+      const right = parseUnary();
+      if (operator === "*") value *= right;
+      else if (operator === "/") value /= right;
+      else value %= right;
+    }
+    return value;
+  };
+
+  const parseExpression = (): number => {
+    let value = parseTerm();
+    while (["+", "-"].includes(peek())) {
+      const operator = take();
+      const right = parseTerm();
+      value = operator === "+" ? value + right : value - right;
+    }
+    return value;
+  };
+
+  const result = parseExpression();
+  if (index !== tokens.length) throw new Error("表达式未完整解析");
+  if (!Number.isFinite(result) || Math.abs(result) > 1e15) {
+    throw new Error("计算结果超出允许范围");
+  }
+  return result;
+}
+
 type ToolHandler = (...args: any[]) => ToolResult;
 
 interface Tool {
@@ -84,8 +153,7 @@ function searchWebHandler(args: { query: string; max_results?: number }): ToolRe
 
 function calculateHandler(args: { expression: string }): ToolResult {
   try {
-    // Safe evaluation for demo purposes
-    const result = Function(`"use strict"; return (${args.expression})`)();
+    const result = safeCalculate(args.expression);
     return { success: true, expression: args.expression, result };
   } catch (e) {
     return { success: false, expression: args.expression, error: String(e) };
@@ -140,6 +208,7 @@ function main(): void {
   const testCases = [
     { name: "search_web", args: { query: "AI Agent 架构 2026", max_results: 3 } },
     { name: "calculate", args: { expression: "2 ** 10 + 3 * 5" } },
+    { name: "calculate", args: { expression: "globalThis.process.exit()" } },
     { name: "unknown_tool", args: {} },
   ];
 

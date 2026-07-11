@@ -5,7 +5,7 @@
 
 ## 前置知识
 - 第 4 章「Context 管理」
-- 第 11 章「Memory」
+- 第 8 章「Memory」
 
 ## 运行方式
 
@@ -28,4 +28,4 @@ npm run start
 
 ## 相关章节
 - 第 4 章 Context 管理
-- 第 11 章 Memory
+- 第 8 章 Memory

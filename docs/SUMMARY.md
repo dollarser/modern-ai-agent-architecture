@@ -29,7 +29,7 @@
 ## 第五部分：规模化与生产
 
 - [第 15 章 Agent 设计模式](chapters/15-design-patterns/README.md)
-- [第 16 章 增强版 Agent 实现](chapters/16-enhanced-agent/README.md)
+- [第 16 章 增强版 Agent 最终组装](chapters/16-enhanced-agent/README.md)
 - [第 17 章 工程实践与生产部署](chapters/17-engineering-practice/README.md)
 - [第 18 章 最佳实践、评估与反模式](chapters/18-best-practices/README.md)
 

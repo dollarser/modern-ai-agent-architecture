@@ -30,7 +30,7 @@
 
 ## 1. 背景
 
-第 7 章 MVP 中的回调列表只用于展示事件位置，第 9 章 Runtime 则定义了可控制的执行生命周期。本章把两者演进为有顺序、可中断、可审计的 Hook Pipeline；它不应承载业务主流程或取代每次 Tool 执行时的授权判断。
+第 7 章 MVP 只保留直接控制流，第 9 章 Runtime 定义了可控制的执行生命周期。本章从 Runtime 的事件点演进出有顺序、可中断、可审计的 Hook Pipeline；它不应承载业务主流程，也不能取代 Tool Handler 内部的最终授权检查。
 
 ### 1.1 为什么需要 Hook
 
@@ -54,7 +54,7 @@ Hook 的设计遵循以下原则：
 
 1. **非侵入性：** Hook 不修改 Agent 核心逻辑，只做拦截和增强
 2. **可组合性：** 多个 Hook 可以注册到同一个事件，按顺序执行
-3. **失败隔离：** 一个 Hook 的失败不应影响 Agent 主流程
+3. **失败策略明确：** Guard / Before Hook 失败时应阻止操作；日志、指标等观测 Hook 失败时隔离并记录
 4. **轻量级：** Hook 应该快速执行，不应阻塞主流程
 
 > **来源类型：** 作者观点 —— 基于 Claude Code Hooks 和 Web 中间件的设计模式
@@ -297,7 +297,8 @@ class AgentWithHooks:
         )
         self.hooks.trigger(f"after_{phase}", ctx)
 
-        return result
+        # After Hook 的脱敏或输出变换需要显式传回调用方
+        return ctx.data.get("result", result)
 
     def run(self, task: str):
         """运行 Agent 完整生命周期"""
@@ -469,7 +470,7 @@ masking = create_masking_hook({
 
 1. **Hook 只做横切关注点：** 日志、监控、权限、脱敏。不要将业务逻辑放入 Hook。
 2. **Hook 快速执行：** Hook 不应阻塞主流程。耗时操作（如写数据库）应异步处理。
-3. **失败隔离：** 一个 Hook 的失败不应影响其他 Hook 或 Agent 主流程。
+3. **按类型处理失败：** Guard / Before Hook 采用 fail-closed；日志、指标等观测 Hook 失败时记录并继续。
 4. **优先级排序：** 权限检查应在最前面（HIGH），日志可以放在最后（LOW）。
 5. **Hook 可配置：** 通过配置控制 Hook 的启用/禁用，方便调试和性能调优。
 6. **命名清晰：** Hook 名称应清晰表达其功能，便于调试时定位。
@@ -483,7 +484,7 @@ masking = create_masking_hook({
 | Hook 承担业务逻辑 | 耦合严重，难以测试 | Hook 只做横切关注点 |
 | Hook 阻塞主流程 | Agent 响应变慢 | 耗时操作异步化 |
 | Hook 修改核心数据 | 数据不一致，难以调试 | Hook 只读或只修改元数据 |
-| 忽略 Hook 异常 | 静默失败，问题隐藏 | 记录 Hook 异常但不中断主流程 |
+| 对所有 Hook 使用同一异常策略 | 权限失败被放行，或观测失败拖垮任务 | Guard 失败阻断；观测失败记录并隔离 |
 | Hook 过多 | 性能下降，调试困难 | 按需注册，定期审查 |
 | Hook 间有依赖 | 顺序敏感，脆弱 | 每个 Hook 独立，不依赖其他 Hook |
 

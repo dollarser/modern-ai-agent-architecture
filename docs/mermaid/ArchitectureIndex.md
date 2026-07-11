@@ -7,7 +7,7 @@
 ### Agent 整体架构
 
 ```
-User → Prompt → Instructions → Agent → Tool Calling → MCP Tools
+Prompt + Instructions → Context → Runtime → Tool Router → Built-in / MCP Tools
 ```
 
 详见：[图 2-1] Agent 整体架构（第 2 章）
@@ -19,12 +19,13 @@ Context → Runtime → Planner → Tool Router → Built-in / Plugin / MCP
              ↕ Memory / Checkpoint / Orchestration / Governance
 ```
 
-详见：[图 16-1：最终 Agent 能力总览](../chapters/16-enhanced-agent/README.md)
+详见：[图 16-1：Enhanced Agent 最终组装架构](../chapters/16-enhanced-agent/README.md)
 
 ### Agent 主循环
 
 ```
-Reasoning → Planning → Skills → Tool Calling → Observation → Reasoning ...
+Context → Reasoning → Planning → Tool Calling → Observation → Reasoning ...
+Skill Loader -.按需加载.→ Context / Planning
 ```
 
 详见：[图 2-2] Agent 主循环（第 2 章）

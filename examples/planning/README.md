@@ -28,4 +28,4 @@ npm run start
 
 ## 相关章节
 - 第 5 章 Reasoning 与 Planning
-- 第 16 章 设计模式
+- 第 15 章 Agent 设计模式

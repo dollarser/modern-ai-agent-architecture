@@ -1,7 +1,7 @@
 {
   "name": "coding-agent-mvp",
   "version": "1.0.0",
-  "description": "Coding Agent MVP - Complete Agent implementation",
+  "description": "Cross-component Coding Agent preview, not the final architecture",
   "main": "dist/main.js",
   "scripts": {
     "start": "tsx main.ts",

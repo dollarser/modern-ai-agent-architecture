@@ -8,8 +8,53 @@ Tool Calling - Tool 抽象与调用示例
 """
 
 import json
+import ast
+import math
+import operator
 from dataclasses import dataclass
 from typing import Any, Callable
+
+
+_BINARY_OPERATORS = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.Mod: operator.mod,
+    ast.Pow: operator.pow,
+}
+_UNARY_OPERATORS = {ast.UAdd: operator.pos, ast.USub: operator.neg}
+
+
+def safe_calculate(expression: str) -> int | float:
+    """只计算数字、括号和基础算术运算，不执行名称、调用或属性访问。"""
+    if len(expression) > 128:
+        raise ValueError("表达式过长")
+    tree = ast.parse(expression, mode="eval")
+    if sum(1 for _ in ast.walk(tree)) > 32:
+        raise ValueError("表达式过于复杂")
+
+    def evaluate(node: ast.AST) -> int | float:
+        if isinstance(node, ast.Expression):
+            return evaluate(node.body)
+        if isinstance(node, ast.Constant):
+            if isinstance(node.value, bool) or not isinstance(node.value, (int, float)):
+                raise ValueError("只允许数字常量")
+            return node.value
+        if isinstance(node, ast.UnaryOp) and type(node.op) in _UNARY_OPERATORS:
+            return _UNARY_OPERATORS[type(node.op)](evaluate(node.operand))
+        if isinstance(node, ast.BinOp) and type(node.op) in _BINARY_OPERATORS:
+            left = evaluate(node.left)
+            right = evaluate(node.right)
+            if isinstance(node.op, ast.Pow) and abs(right) > 10:
+                raise ValueError("指数绝对值不能超过 10")
+            result = _BINARY_OPERATORS[type(node.op)](left, right)
+            if not math.isfinite(result) or abs(result) > 1e15:
+                raise ValueError("计算结果超出允许范围")
+            return result
+        raise ValueError(f"不允许的表达式节点: {type(node).__name__}")
+
+    return evaluate(tree)
 
 
 @dataclass
@@ -82,7 +127,7 @@ def search_web_handler(query: str, max_results: int = 5) -> dict:
 def calculate_handler(expression: str) -> dict:
     """执行数学计算"""
     try:
-        result = eval(expression, {"__builtins__": {}}, {})
+        result = safe_calculate(expression)
         return {"success": True, "expression": expression, "result": result}
     except Exception as e:
         return {"success": False, "expression": expression, "error": str(e)}
@@ -169,6 +214,10 @@ def main():
         {
             "name": "calculate",
             "arguments": {"expression": "2 ** 10 + 3 * 5"}
+        },
+        {
+            "name": "calculate",
+            "arguments": {"expression": "__import__('os').getcwd()"}
         },
         {
             "name": "search_web",

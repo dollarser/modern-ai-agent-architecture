@@ -4,7 +4,18 @@
 
 ## [Unreleased] - 2026-07-11
 
+### 重构
+- 将第 16 章重构为最终组装章：以 Port / Adapter 和 Composition Root 组合 Memory、完整生命周期 Hooks、带来源与状态的 Tool Router、MCP、Plugin、Human Approval、Handoff/Subagent 和 Event Bus。
+- 重构 `examples/enhanced-agent/` 的 Python 与 TypeScript 实现，新增上述能力的离线最小适配器与端到端契约测试，明确功能闭环与生产基础设施的边界。
+
 ### 修正
+- 将 Tool Calling 与 Tool Registry 双语言示例中的 `eval` / `Function` 动态执行替换为受限算术解析器，只允许数字、括号和白名单运算符，并限制复杂度、指数与结果范围。
+- 修正第 9 章将取消、暂停和步数耗尽覆盖为 `FINISHED` 的终态错误；新增 `EXHAUSTED`，只有明确完成条件才能成功。
+- 统一第 16 章韧性执行片段与 Enhanced Agent 的 `retryable` 契约，并将第 17 章未配置权限策略的 Tool 改为默认拒绝。
+- 修正第 9 章在执行前检查单步耗时、并在 `as_completed` 后设置无效 timeout 的问题，改为 Future 等待上限，并明确底层取消与幂等边界。
+- 修正第 10 章对新版 MVP 的过期回调描述，统一 Guard Hook 与观测 Hook 的失败策略，让 After Hook 的输出变换显式返回，并同步双语言示例的真实拦截行为。
+- 重写第 17 章已引用旧版 `AgentMVP` 的失效测试片段，改为链接并摘录当前最小与 Enhanced Agent 的可运行契约测试。
+- 修正 6 个示例 README 中因章节重排遗留的章节号，并清理 Coding Agent 组合预览中的“完整 MVP”旧名称。
 - 收敛第 7 章为单轮最小纵向闭环：统一正文与可运行示例，修正 Instructions、步数、失败状态、测试和运行路径语义，并移除提前拼装后续组件的重复实现。
 - 修正架构图索引中第 5 章 ReAct 与 Plan-and-Execute 的图号引用。
 - 修正第 7 章图 7-1 的组件边界：将简单 Runtime Loop 纳入 Agent MVP，并移除最小示例中尚不存在的 LLM Interface。
@@ -18,6 +29,9 @@
 - 修正 MkDocs 的文档根目录和许可证入口；严格构建现已可通过。
 
 ### 新增
+- 新增 `examples/runtime/` 双语言状态机及契约测试，覆盖完成、步数耗尽、及时超时和取消；为 Hooks 双语言示例补充 Guard、结果传播和观测失败隔离测试。
+- 新增 TypeScript 示例 CI，在 Node.js 18、20、22 上对全部工程执行锁文件安装、严格编译和可选测试。
+- 新增 `examples/enhanced-agent/` 的 Python 与 TypeScript 可运行实现及契约测试，覆盖 Adapter、Skills、依赖并行、重试、Hooks、Memory、Checkpoint 恢复和诚实终止状态。
 - 第 16 章补充从第 7 章 MVP 逐章演进而来的最终 Agent 能力总览，明确 Runtime、Context、模型、Tool/MCP/Plugin、状态、编排与治理边界。
 - 为全部 20 章增加章末小结，统一收束核心边界、适用条件和工程取舍。
 - 第 2 章补充 Scaffolding、Harness、Runtime 与 Orchestration 的职责图和术语边界。
@@ -35,7 +49,7 @@
 - 将 `PRD/BookSpec-1.0/` 补充为当前有效的书稿维护、审阅和验收规范；V7 仅保留为历史需求基线。
 - 重构为六部分学习路径：基础认知、构建首个 Agent、可靠运行、扩展与互操作、规模化与生产、案例与索引；MVP 前移至第 7 章，框架分析后移至第 19 章，并同步章节目录、链接、图号、学习路线和索引。
 - 新增 `examples/agent-mvp-minimal/` 的 Python 与 TypeScript 最小纵向切片；保留 `coding-agent-mvp` 作为跨组件组合预览，并收紧其 MCP 能力声明。
-- 复核当前数量：20 个章节、45 张 Mermaid 图、10 个独立示例工程、20 个双语言入口和 158 个 Markdown 表格；同步修正主页与 BookSpec 指标。
+- 复核当前数量：20 个章节、45 张 Mermaid 图、12 个独立示例工程、24 个双语言入口和 160 个 Markdown 表格；同步修正主页与 BookSpec 指标。
 - 发布前复审：修复第 18 章的 Markdown 围栏，收紧第 19 章的产品断言，并移除 Memory、Context 预算、成本和模型示例中的不可泛化固定阈值与默认值。
 - 复核并优化流程图的方向和连接语义：将长链流程改为纵向主链，修正 Tool 路由评分、MCP/Plugin 选型和 Memory/RAG 决策关系，并补充 Mermaid 图方向规范。
 - 审校跨章节表格：收紧单轮 LLM/Agent、Built-in/MCP、Prompt/Instructions、Memory 与 Hook 的绝对表述；将模式、性能和框架能力表改为条件化的选型与试点核查表。

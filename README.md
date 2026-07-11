@@ -26,7 +26,7 @@ uv pip install mkdocs-material mkdocs-minify-plugin
 
 ## 示例代码
 
-仓库包含 10 个独立示例工程，每个主题均提供 Python 与 TypeScript 实现。依赖和运行方式见各示例目录中的 `README.md`。
+仓库包含 12 个独立示例工程，每个主题均提供 Python 与 TypeScript 实现。依赖和运行方式见各示例目录中的 `README.md`。
 
 ```bash
 # Python

@@ -121,7 +121,7 @@ class AgentConfig:
 
 
 class CodingAgent:
-    """完整的 Coding Agent MVP"""
+    """跨组件组合预览，不代表最终架构。"""
 
     def __init__(self, config: AgentConfig):
         self.config = config
@@ -177,7 +177,7 @@ class CodingAgent:
         self.memory.add("user", prompt)
 
         print(f"\n{'='*60}")
-        print(f"  Coding Agent MVP")
+        print(f"  Coding Agent 组合预览")
         print(f"{'='*60}")
         print(f"  任务: {prompt}")
         print(f"  可用 Tool: {self.tool_registry.list_all()}")

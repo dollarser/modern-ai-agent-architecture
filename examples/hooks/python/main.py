@@ -29,6 +29,8 @@ class HookSystem:
             try:
                 hook(*args, **kwargs)
             except Exception as e:
+                if event.startswith("before_"):
+                    raise
                 print(f"  [Hook Error] {event}: {e}")
 
 
@@ -65,23 +67,28 @@ class AgentWithHooks:
         """注册自定义 Hook"""
         self.hooks.register(event, callback)
 
-    def run(self, task: str = "demo"):
-        """运行 Agent 生命周期"""
-        events = [
-            ("before_load", task),
-            ("after_load", task),
-            ("before_reasoning", task),
-            ("after_reasoning", "分析完成"),
-            ("before_tool_call", "search_web"),
-            ("after_tool_call", "search_web", "搜索完成"),
-            ("before_finish",),
-            ("after_finish",),
-        ]
+    def run(self, task: str = "demo",
+            tool_name: str = "search_web") -> dict | None:
+        """运行 Agent 生命周期；Before Hook 拒绝时不执行 Tool。"""
+        self.hooks.trigger("before_load", task)
+        self.hooks.trigger("after_load", task)
+        self.hooks.trigger("before_reasoning", task)
+        self.hooks.trigger("after_reasoning", "分析完成")
 
-        for event_args in events:
-            event = event_args[0]
-            args = event_args[1:]
-            self.hooks.trigger(event, *args)
+        try:
+            self.hooks.trigger("before_tool_call", tool_name)
+        except Exception as error:
+            print(f"  [BLOCKED] {error}")
+            return None
+
+        tool_result = {
+            "success": True,
+            "content": f"{tool_name} 执行完成；token=sk-demo",
+        }
+        self.hooks.trigger("after_tool_call", tool_name, tool_result)
+        self.hooks.trigger("before_finish")
+        self.hooks.trigger("after_finish")
+        return tool_result
 
 
 def main():
@@ -95,11 +102,15 @@ def main():
     def permission_check(tool_name: str):
         allowed = ["search_web", "read_file", "calculate"]
         if tool_name not in allowed:
-            print(f"  [PERMISSION] ⛔ 拒绝 Tool: {tool_name}")
-        else:
-            print(f"  [PERMISSION] ✅ 允许 Tool: {tool_name}")
+            raise PermissionError(f"拒绝 Tool: {tool_name}")
+        print(f"  [PERMISSION] ✅ 允许 Tool: {tool_name}")
 
     agent.register_custom_hook("before_tool_call", permission_check)
+
+    def mask_secret(_tool_name: str, result: dict):
+        result["content"] = result["content"].replace("sk-demo", "sk-***")
+
+    agent.register_custom_hook("after_tool_call", mask_secret)
 
     def timing_hook(*args):
         import time
@@ -111,6 +122,7 @@ def main():
     print("\n  运行 Agent 生命周期:")
     print("  " + "-" * 40)
     agent.run("搜索 AI 新闻")
+    agent.run("尝试危险操作", tool_name="delete_all")
     print("  " + "-" * 40)
     print("=" * 60)
 

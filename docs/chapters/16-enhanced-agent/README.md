@@ -1,4 +1,4 @@
-# 第 16 章：增强版 Agent 实现
+# 第 16 章：增强版 Agent 最终组装
 
 > **难度等级：** ⭐⭐⭐⭐⭐
 > **所属模块：** 第五部分：规模化与生产
@@ -11,693 +11,407 @@
 
 完成本章学习后，你将能够：
 
-1. 将 MVP Agent 升级为生产级增强版
-2. 集成真实 LLM 实现动态推理和规划
-3. 实现并行 Tool 调用和流式输出
-4. 实现状态持久化和中断恢复
-5. 掌握 Agent 的性能优化和韧性策略
+1. 将第 7 章 MVP 与第 8～15 章能力组装为一个可运行 Agent
+2. 用 Port / Adapter 隔离 Runtime 与具体基础设施
+3. 让 Skills、MCP 和 Plugin 通过统一扩展边界进入 Agent
+4. 在 Tool 副作用之前加入 Hook、策略和人工审批
+5. 用 Handoff、Subagent 和 Event Bus 完成最小编排闭环
+6. 区分“功能闭环完整”和“生产基础设施完整”
 
 ---
 
 ## 前置知识
 
 - 阅读第 7 章「Agent MVP：从零实现」
-- 建议阅读第 8--11 章的可靠运行组件和第 15 章的模式选择
-- 了解 LLM API 的基本使用
+- 建议阅读第 8～11 章的可靠运行组件
+- 阅读第 12 章「Skills」、第 13 章「MCP」和第 14 章「Plugin」，理解扩展能力如何进入 Context 与 Tool Registry
+- 阅读第 15 章，理解单 Agent、Handoff、Subagents 与事件驱动架构的适用边界
+- 了解依赖注入、异步执行和结构化数据接口
 
 ---
 
-## 1. MVP vs Enhanced 对比
+## 1. 本章定位：组装，而不是重复实现
 
-| 维度 | 第 7 章最小 MVP | 增强版可选能力 |
-|------|-------------------|------------------|
-| 推理 | 规则或固定流程 | 可接入 LLM 动态推理，并以 schema / 预算约束 |
-| 规划 | 模板化计划 | 可加入 LLM 规划与自适应调整 |
-| Tool 选择 | 少量静态映射 | 可加入模型选择、Router 或策略过滤 |
-| 执行 | 串行执行 | 可对独立操作并行执行 |
-| 输出 | 一次性返回 | 可提供流式输出 |
-| 状态 | 当前任务内存状态 | 可持久化并支持中断恢复 |
-| 错误处理 | 基础失败返回 | 可加入分级降级、重试与熔断 |
-| 监控 | 控制台输出 | 可加入结构化指标与 Trace |
-| MCP / Skills | 不作为 MVP 必需能力 | 可按互操作与工作流复用需求接入 |
+第 8～15 章分别解释 Memory、Runtime、Hooks、Tool Registry、Skills、MCP、Plugin 和编排模式。如果第 16 章把这些代码完整复制一遍，不仅篇幅失控，还会形成多份容易漂移的实现；如果只画架构图、定义空接口，又无法证明它们真的能协作。
 
-### 1.1 升级决策：不要把 Enhanced 当作默认答案
+本章采用中间方案：
 
-**Why / What：** Enhanced Agent 是为真实模型调用、长任务和可恢复执行补齐工程能力的实现层，不是“功能越多越好”的模板。它解决的是 MVP 在动态决策、外部副作用和运行中断下的边界，而不是替代清晰的任务定义和 Tool 设计。
+> 将前面章节的能力提炼为稳定 Port，为每个 Port 提供一个离线最小 Adapter，再通过 Composition Root 和端到端测试证明最终组装成立。
 
-| When：出现的信号 | 优先增加的能力 | Trade-off：新增复杂度 |
-|------------------|----------------|------------------------|
-| 规则 Planner 覆盖不了任务差异 | LLM Planner 与结构化计划校验 | 输出不确定、评估成本上升；设置步数、预算和计划 schema |
-| 独立 Tool 调用占据主要等待时间 | 依赖感知的并行执行 | 竞态、限流与部分失败更复杂；只并行无数据依赖且可安全重试的调用 |
-| 用户需要中断、审批后继续或长任务恢复 | 持久化状态与检查点 | 幂等、迁移和数据保留成为必须设计；副作用操作需记录幂等键和恢复策略 |
-| 难以定位质量、成本或安全问题 | Trace、指标、Guardrails 与审批 | 遥测和日志会带来存储、隐私与访问控制负担；实施最小采集和脱敏 |
+### 1.1 完整性的两个层次
 
-当任务仍是短、只读、确定且流量有限的流程时，第 7 章的 MVP 往往更可控。只有问题的收益足以覆盖上述运行与治理成本，才逐项升级，而不是一次性启用所有能力。
+| 层次 | 本章是否完成 | 含义 |
+|------|--------------|------|
+| 功能闭环完整 | 是 | 每个关键组件有真实最小实现，并进入同一条 Runtime 执行链路 |
+| 生产基础设施完整 | 否 | 不包含分布式存储、真实 Provider、完整 MCP Transport、Plugin 沙箱、审批后台和持久化消息系统 |
 
-### 1.2 从第 7 章 MVP 到最终功能架构
+因此，本章可以称为“最终组装参考实现”，但不把教学代码误称为生产框架。
 
-下面这张图是全书组件完成组装后的**能力总览**，不是要求每个 Agent 都启用全部模块。实线表示主要数据或控制流，虚线表示按需加载、治理或观测关系；外部 Provider、MCP Server 和业务系统不属于 Agent Host 内部。
+### 1.2 从 MVP 到最终组装
+
+| 阶段 | 增加的能力 | 保持不变的契约 |
+|------|------------|----------------|
+| 第 7 章 | 最小 Runtime、Planner、Tool、Observation | 只有明确完成才返回成功 |
+| 第 8～11 章 | Memory、恢复、Hooks、Registry、Router | Runtime 仍负责协调而不吞掉组件边界 |
+| 第 12～14 章 | Skill Loader、MCP Adapter、Plugin Loader | 扩展只能通过 Context、Hook 或 Tool Registry 进入 |
+| 第 15～16 章 | Approval、Handoff、Subagent、Event Bus | 外部副作用受控，父子任务可追踪 |
+
+---
+
+## 2. 最终组装架构
 
 ```mermaid
 flowchart LR
-    Entry["User / API / UI"] --> Input["Task / Prompt"]
+    Input["Task / Prompt"] --> Root["Composition Root"]
 
-    subgraph Host["Agent Host（最终能力总览）"]
-        subgraph ContextLayer["输入与上下文｜第 3--4、12 章"]
-            Input --> Context["Context Manager"]
-            Instructions["Instructions"] --> Context
-            SkillLoader["Skill Loader"] -.按需加载.-> Context
-        end
+    subgraph Host["Enhanced Agent Host"]
+        Root --> Runtime["Runtime + Checkpoint"]
+        Root --> Context["Context Builder"]
+        Root --> Hooks["Lifecycle Hook Pipeline"]
+        Root --> Router["Tool Router"]
+        Root --> Approval["Human Approval Gate"]
+        Root --> Orchestrator["Handoff Coordinator"]
 
-        subgraph Harness["Harness / Runtime｜第 7、9--10、16--17 章"]
-            Runtime["Runtime Loop<br/>预算・超时・重试・暂停恢复"]
-            Reasoning["Reasoning"]
-            Planner["Planner<br/>计划与依赖"]
-            TaskState["Task State / Checkpoint"]
-            ModelAdapter["LLM Adapter"]
-            Runtime --> Reasoning --> Planner --> Runtime
-            Runtime <--> TaskState
-            Runtime <--> ModelAdapter
-        end
-
-        subgraph Execution["执行与扩展｜第 6、11、13--14 章"]
-            Router["Tool Router"] --> Registry["Tool Registry"]
-            Registry --> Builtins["Built-in Tools"]
-            Registry --> Plugin["Plugin Tools"]
-            Registry --> MCPClient["MCP Client"]
-        end
-
-        subgraph StateKnowledge["状态与知识｜第 4、8、16 章"]
-            Memory["Memory<br/>短期・工作・长期"]
-            Knowledge["Knowledge / RAG"]
-            Store[("Persistent Store")]
-            Memory <--> Store
-            Knowledge <--> Store
-        end
-
-        subgraph Orchestration["编排｜第 15--16 章"]
-            Coordinator["Coordinator / Handoff"]
-            Subagents["Subagents"]
-            EventBus["Event Bus"]
-            Coordinator <--> Subagents
-            Coordinator <--> EventBus
-        end
-
-        subgraph Governance["治理与可观测性｜第 10、16--18 章"]
-            Guardrails["Guardrails / Policy"]
-            Approval["Human Approval"]
-            Observability["Hooks・Tracing・Metrics・Audit"]
-        end
-
-        Context --> Runtime
+        Context --> Skills["Skill Registry"]
+        Context --> MemoryPort["MemoryBackend"]
+        Runtime --> Context
+        Runtime --> Hooks
         Runtime --> Router
-        Router --> Runtime
-        Runtime <--> Memory
-        Context <--> Knowledge
-        Runtime <--> Coordinator
-        Guardrails -.约束.-> Runtime
-        Guardrails -.过滤.-> Router
-        Approval -.批准副作用.-> Runtime
-        Observability -.观测.-> Runtime
-        Observability -.审计.-> Router
+        Router --> Registry["Tool Registry"]
+        Router --> Approval
+        Router --> Orchestrator
+
+        Registry --> Builtin["Built-in Tools"]
+        Registry --> MCPTools["MCP Tools"]
+        Registry --> PluginTools["Plugin Tools"]
+        PluginLoader["PluginLoader"] --> Registry
+        PluginLoader --> Skills
+        PluginLoader --> Hooks
+        Orchestrator --> Subagent["Review Subagent"]
+        Orchestrator --> EventBus["Event Bus"]
     end
 
-    subgraph External["外部系统边界"]
-        Provider["LLM Provider"]
-        MCPServers["MCP Servers"]
-        Business["Filesystem / API / Database"]
-    end
-
-    ModelAdapter <--> Provider
-    MCPClient <--> MCPServers
-    Builtins --> Business
-    Plugin --> Business
+    MCPAdapter["MCPToolAdapter"] --> MCPTools
+    MCPClient["MCPClient Port"] --> MCPAdapter
+    MemoryPort -.替换.-> ExternalMemory["DB / Vector Store"]
+    MCPClient -.替换.-> MCPServer["MCP Server"]
+    Approval -.替换.-> ApprovalUI["CLI / Web / Workflow"]
+    EventBus -.替换.-> DurableBus["Durable Message Bus"]
 ```
 
-> **图 16-1：** 从 MVP 演进而来的最终 Agent 能力总览。第 7 章的 `Runtime → Planner → Tool → Observation` 是中轴；第 8--11 章补齐可靠运行，第 12--14 章增加扩展与互操作，第 15--17 章加入编排、模型驱动能力和生产治理。LLM Adapter 属于 Host 的集成边界，LLM Provider 位于外部。
+> **图 16-1：** Enhanced Agent 最终组装架构。实线是本章离线实现的真实调用关系，虚线表示生产环境可替换的基础设施。Composition Root 负责装配，Runtime 只依赖稳定 Port。
 
-| 演进阶段 | 在图 16-1 中增加的能力 | 保持不变的核心契约 |
-|----------|--------------------------|--------------------|
-| 第 7 章：MVP | Task / Prompt、Instructions、简单 Runtime、Rule Planner、TaskState、Built-in Tool | 一次 Tool 调用对应一步；成功、失败和终止可区分 |
-| 第 8--11 章：可靠运行 | Memory、Checkpoint、超时/重试/恢复、Hooks、Tool Registry / Router | Runtime 仍协调决策、执行与 Observation |
-| 第 12--14 章：扩展与互操作 | Skill Loader、MCP Client、Plugin Tools | 扩展能力通过受控接口进入 Context 或 Registry |
-| 第 15--17 章：编排与生产 | Subagents、Event Bus、LLM Adapter、持久化、Guardrails、审批、Tracing | 外部副作用受权限和审批约束，状态与 Trace 可恢复、可审计 |
+### 2.1 Composition Root 为什么重要
 
-图中的“最终”表示**能力集合完整**，不表示部署时必须全部开启。短、只读、确定的任务仍可以停留在第 7 章形态；只有出现动态决策、长任务、跨系统操作或治理需求时，才增加对应模块。
+如果 Runtime 在构造函数内部直接创建数据库、MCP SDK、审批 UI 和子 Agent，它就无法独立测试，也无法替换实现。本章的 `EnhancedAgent` 是 Composition Root：默认创建离线 Adapter，同时允许从构造函数注入替代实现。
+
+```python
+agent = EnhancedAgent(
+    checkpoint_path,
+    llm=my_llm_adapter,
+    memory=my_memory_backend,
+    mcp_client=my_mcp_client,
+    approval=my_approval_gate,
+    event_bus=my_event_bus,
+    subagent=my_agent_runner,
+)
+```
+
+TypeScript 通过第三个 `dependencies` 参数注入同一组端口。Runtime 与具体 SDK 无直接依赖。
 
 ---
 
-## 2. 增强版架构
+## 3. 稳定 Port 与最小 Adapter
+
+### 3.1 MemoryBackend
+
+Memory 不再是 Runtime 内部的一段列表，而是可替换端口：
+
+```python
+class MemoryBackend(Protocol):
+    def append(self, session_id: str, entry: MemoryEntry) -> None: ...
+    def recent(self, session_id: str, limit: int = 12) -> list[MemoryEntry]: ...
+    def remember(self, namespace: str, entry: MemoryEntry) -> None: ...
+    def search(self, namespace: str, query: str,
+               limit: int = 5) -> list[MemoryEntry]: ...
+```
+
+本章的 `InMemoryMemoryBackend` 提供：
+
+- 短期记忆：按 `session_id` 隔离的追加与最近记录
+- 长期记忆：按 Namespace 保存跨 Session 信息
+- 检索：确定性的词项和中文二元片段评分
+
+它证明检索结果可以在规划前进入 Context，但不冒充向量语义检索。生产环境可以实现同一接口，接入 SQL、文档数据库或向量数据库。
+
+### 3.2 完整生命周期 Hook Pipeline
+
+本章统一了以下事件：
+
+```text
+新任务：before_run → before_plan → after_plan
+恢复：  before_run → on_resume
+执行：  before_tool
+          → before_approval → after_approval
+          → after_tool / on_tool_error
+结束：  after_run → on_finish
+```
+
+Hook 分成两类：
+
+| 类型 | 用途 | 失败策略 |
+|------|------|----------|
+| Guard | 权限、Allowlist、策略、审批前置条件 | fail-closed，阻止 Tool Handler |
+| Observer | 日志、Tracing、指标、审计副本 | 隔离错误，写入 `observer_error` Trace |
+
+Hook 支持优先级和 Owner。Plugin 卸载时会移除其注册的 Hook，避免残留回调继续运行。
+
+### 3.3 Tool Registry 与 Router
+
+统一 Tool 元数据包括：
+
+```text
+name / description / parameters
+source / source_name
+state / tags
+requires_approval
+handler
+```
+
+`source` 只能是 `builtin`、`mcp` 或 `plugin`；`state` 包含 `active`、`disabled`、`deprecated` 和 `error`。Registry 负责注册和来源索引语义，Router 只暴露并执行 `active` Tool。Planner 获取的是 Router 过滤后的 Tool，而不是 Registry 的原始全集。
+
+执行前必须再次 `resolve()`，因为 Tool 可能在计划生成后被禁用。
+
+---
+
+## 4. Skills、MCP 与 Plugin 接入
+
+### 4.1 Skill 在规划前进入 Context
 
 ```mermaid
-graph TD
-    subgraph "Enhanced Agent"
-        LLM[LLM Interface<br/>多模型支持] --> Core[Agent Core]
-        Core --> Planner[LLM Planner<br/>动态规划]
-        Core --> Memory[Memory Manager<br/>持久化 + 语义搜索]
-        Core --> Tools[Tool Registry<br/>Built-in + MCP + Plugin]
-        Core --> Hooks[Hook Pipeline<br/>优先级 + 中断]
-        Core --> Skills[Skill Loader<br/>匹配 + 组合]
-        Tools --> Parallel[Parallel Executor<br/>并发 Tool 调用]
-        Memory --> Persist[(Persistent Store<br/>SQLite/Postgres)]
-        Core --> Tracing[Tracing<br/>结构化日志 + 指标]
+flowchart LR
+    Task["Task"] --> Match["Skill Match"]
+    Task --> Recall["Memory Search"]
+    Match --> Context["Context Builder"]
+    Recall --> Context
+    Instructions["Global Instructions"] --> Context
+    Context --> Planner["Planner"]
+```
+
+> **图 16-2：** Skill 与 Memory 的加载时序。Skill 指令和检索结果都在 Planner 调用前进入 Context，与第 12 章图 12-2 和可运行代码一致。
+
+### 4.2 MCPToolAdapter
+
+MCP 不需要进入 Runtime 内部。Adapter 将 MCP Tool 转成统一 Tool：
+
+```text
+MCPClient.list_tools()
+→ MCPToolAdapter 转换名称、描述和 Input Schema
+→ ToolRegistry.register(source=mcp)
+→ ToolRouter.execute()
+→ MCPClient.call_tool()
+```
+
+示例使用 `FakeMCPClient` 离线验证发现和调用路径。替换真实 Client 时，Registry、Router、Planner 和 Runtime 都不需要修改。
+
+### 4.3 PluginLoader
+
+Plugin 通过受控的三个注册面扩展 Agent：
+
+```mermaid
+flowchart LR
+    Manifest["Plugin Manifest"] --> Loader["PluginLoader"]
+    Loader --> Tools["Tool Registry"]
+    Loader --> Skills["Skill Registry"]
+    Loader --> Hooks["Hook Pipeline"]
+    Loader --> State["active / unloaded"]
+```
+
+> **图 16-3：** Plugin 加载边界。示例 Plugin `review-pack` 注册两个 Tool，其中 `propose_change` 标记为需要审批。卸载时按 Plugin 来源移除 Tool、Skill 和 Hook。
+
+Plugin 仍在 Host 进程内运行，因此本章不提供安全沙箱。生产系统必须额外考虑签名、权限、依赖验证、资源限制和进程隔离。
+
+---
+
+## 5. Human Approval Gate
+
+高风险操作不能把“是否执行”交给 Tool Handler 自己判断。审批必须发生在 Router 已解析 Tool、但 Handler 尚未调用的窗口：
+
+```mermaid
+sequenceDiagram
+    participant R as Runtime
+    participant H as Hook Pipeline
+    participant T as Tool Router
+    participant A as Approval Gate
+    participant X as Tool Handler
+
+    R->>H: before_tool
+    H-->>R: Guard 通过
+    R->>T: resolve(tool)
+    alt requires_approval
+        R->>H: before_approval
+        R->>A: decide(request)
+        A-->>R: approved / rejected
+        R->>H: after_approval
+    end
+    alt approved 或无需审批
+        R->>X: execute
+        X-->>R: result
+        R->>H: after_tool
+    else rejected
+        R->>H: on_tool_error + after_tool
+        Note over R,X: Handler 从未执行
     end
 ```
 
-> **图 16-2：** 增强版 Agent 的单进程实现切片。它聚焦本章代码如何组合 LLM 接口、并行执行、持久化、Tracing、Skills 与 MCP；跨 Agent 编排、外部系统边界和治理控制以图 16-1 为准。
+> **图 16-4：** 审批执行顺序。审批结果写入 Checkpoint；恢复时复用已有决定，避免同一步骤重复请求审批。
+
+示例提供 `AutoApproveGate` 和 `ScriptedApprovalGate`。后者用于证明拒绝后 Handler 调用次数仍为零。真实系统可以替换成 CLI、Web、工单或策略服务。
 
 ---
 
-## 3. LLM 集成
+## 6. Handoff、Subagent 与 Event Bus
 
-### 3.1 多模型接口
+第 15 章的三种能力在本章形成一个最小闭环：
 
-```python
-"""
-增强版 Agent - LLM 集成
-"""
+- `HandoffRequest`：传递子任务、父 Session、父 Trace 和深度
+- `AgentRunner`：对子 Agent 的统一调用协议
+- `ReviewSubagent`：确定性的离线审查实现
+- `HandoffCoordinator`：限制最大深度并协调执行
+- `EventBus`：发布 `handoff.created` 和 `handoff.completed`
 
-from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from typing import Optional, AsyncIterator
-import json
-import asyncio
-
-
-@dataclass
-class LLMResponse:
-    """LLM 响应"""
-    content: str
-    tool_calls: list[dict] = field(default_factory=list)
-    finish_reason: str = "stop"
-    usage: dict = field(default_factory=dict)
-
-
-class LLMProvider(ABC):
-    """LLM 提供商抽象接口"""
-
-    @abstractmethod
-    async def chat(self, messages: list[dict],
-                   tools: list[dict] = None,
-                   temperature: float = 0.7) -> LLMResponse:
-        """发送对话请求"""
-        ...
-
-    @abstractmethod
-    async def chat_stream(self, messages: list[dict],
-                          tools: list[dict] = None) -> AsyncIterator[str]:
-        """流式对话"""
-        ...
-
-
-class OpenAIProvider(LLMProvider):
-    """OpenAI 兼容提供商"""
-
-    def __init__(self, api_key: str, model: str,
-                 base_url: str = "https://api.openai.com/v1"):
-        self.api_key = api_key
-        self.model = model
-        self.base_url = base_url
-
-    async def chat(self, messages, tools=None, temperature=0.7):
-        return LLMResponse(
-            content="根据分析，我需要执行以下步骤...",
-            usage={"prompt_tokens": 100, "completion_tokens": 50}
-        )
-
-    async def chat_stream(self, messages, tools=None):
-        for word in ["根据", "分析", "，", "任务", "需要", "..."]:
-            yield word
-            await asyncio.sleep(0.01)
-
-
-class AnthropicProvider(LLMProvider):
-    """Anthropic Claude 提供商"""
-
-    def __init__(self, api_key: str, model: str):
-        self.api_key = api_key
-        self.model = model
-
-    async def chat(self, messages, tools=None, temperature=0.7):
-        return LLMResponse(
-            content="Let me analyze this task step by step...",
-            usage={"input_tokens": 100, "output_tokens": 50}
-        )
-
-    async def chat_stream(self, messages, tools=None):
-        for word in ["Let", " me", " analyze", " this", "..."]:
-            yield word
-            await asyncio.sleep(0.01)
+```text
+Plugin Tool 生成变更建议
+→ HandoffCoordinator
+→ ReviewSubagent
+→ 结构化审查结果
+→ compose_report
 ```
 
-### 3.2 LLM 驱动的 Planner
-
-```python
-class LLMPlanner:
-    """LLM 驱动的任务规划器"""
-
-    PLANNING_PROMPT = """你是一个任务规划器。根据用户的任务，制定详细的执行计划。
-
-可用工具:
-{tools}
-
-请输出 JSON 格式的执行计划:
-{{
-    "plan": [
-        {{
-            "id": 1,
-            "description": "步骤描述",
-            "tool": "使用的工具名称",
-            "tool_args": {{"参数名": "参数值"}},
-            "depends_on": [],
-            "expected_output": "预期输出"
-        }}
-    ],
-    "reasoning": "整体规划理由",
-    "estimated_steps": 3
-}}
-
-任务: {task}"""
-
-    def __init__(self, llm: LLMProvider):
-        self.llm = llm
-
-    async def create_plan(self, task: str,
-                          tools: list[dict]) -> dict:
-        """创建动态执行计划"""
-        tools_desc = "\n".join(
-            f"- {t['function']['name']}: {t['function']['description']}"
-            for t in tools
-        )
-        prompt = self.PLANNING_PROMPT.format(tools=tools_desc, task=task)
-        response = await self.llm.chat([
-            {"role": "user", "content": prompt}
-        ])
-        try:
-            return json.loads(response.content)
-        except json.JSONDecodeError:
-            return {
-                "plan": [
-                    {"id": 1, "description": "分析任务", "tool": "analyze",
-                     "tool_args": {}, "depends_on": [], "expected_output": "分析结果"},
-                    {"id": 2, "description": "执行操作", "tool": "execute",
-                     "tool_args": {}, "depends_on": [1], "expected_output": "执行结果"},
-                ],
-                "reasoning": "回退到默认计划",
-                "estimated_steps": 2
-            }
-
-    async def replan(self, task: str, completed: list[dict],
-                     failed: list[dict], tools: list[dict]) -> dict:
-        """根据执行反馈重新规划"""
-        context = (
-            f"已完成步骤: {json.dumps(completed, ensure_ascii=False)}\n"
-            f"失败步骤: {json.dumps(failed, ensure_ascii=False)}\n"
-            f"请根据当前状态调整后续计划。"
-        )
-        return await self.create_plan(f"{task}\n\n{context}", tools)
-```
+Event Bus 同时记录 `task.started` 和 `task.completed`。内存 Bus 只证明发布/订阅边界，不提供持久化、重放或 Exactly-once 语义。
 
 ---
 
-## 4. 并行执行引擎
+## 7. 端到端最终组装
 
-### 4.1 依赖感知的并行执行
+可运行场景不是把组件并排列在图中，而是让它们进入同一条链路：
 
-```python
-class ParallelExecutor:
-    """支持依赖关系的并行执行器"""
-
-    def __init__(self, max_workers: int = 5, timeout: float = 30.0):
-        self.max_workers = max_workers
-        self.timeout = timeout
-
-    async def execute_with_deps(self, plan: list[dict],
-                                registry) -> list[dict]:
-        """按依赖关系拓扑执行"""
-        results: dict[int, dict] = {}
-        completed: set[int] = set()
-        failed: set[int] = set()
-
-        while len(completed) < len(plan):
-            # 找出所有依赖已满足的步骤
-            ready = []
-            for step in plan:
-                sid = step["id"]
-                if sid in completed:
-                    continue
-                deps = step.get("depends_on", [])
-                if any(d in failed for d in deps):
-                    # 依赖步骤失败，跳过此步骤
-                    results[sid] = {"success": False, "error": "依赖步骤失败，跳过"}
-                    completed.add(sid)
-                    failed.add(sid)
-                    continue
-                if all(d in completed for d in deps):
-                    ready.append(step)
-
-            if not ready:
-                # 检查是否有死锁（所有未完成步骤的依赖都不满足）
-                pending = [s for s in plan if s["id"] not in completed]
-                stuck = all(
-                    not all(d in completed for d in s.get("depends_on", []))
-                    for s in pending
-                )
-                if stuck:
-                    # 跳过卡住的步骤
-                    for s in pending:
-                        results[s["id"]] = {"success": False, "error": "依赖步骤失败，跳过"}
-                        completed.add(s["id"])
-                break
-
-            # 并行执行所有准备好的步骤
-            tasks = [self._execute_single(s, registry) for s in ready]
-            step_results = await asyncio.gather(*tasks, return_exceptions=True)
-
-            for step, result in zip(ready, step_results):
-                if isinstance(result, Exception):
-                    result = {"success": False, "error": str(result)}
-                results[step["id"]] = result
-                completed.add(step["id"])
-
-                # 如果步骤失败，可选择中断或继续
-                if not result.get("success"):
-                    # 标记步骤失败，跳过依赖此步骤的后续步骤
-                    failed.add(step["id"])
-
-        return [results.get(s["id"], {}) for s in plan]
-
-    async def _execute_single(self, step: dict, registry) -> dict:
-        """执行单个步骤"""
-        tool_name = step.get("tool", "")
-        tool_args = step.get("tool_args", {})
-        try:
-            return await asyncio.wait_for(
-                asyncio.to_thread(registry.execute, tool_name, tool_args),
-                timeout=self.timeout
-            )
-        except asyncio.TimeoutError:
-            return {"success": False, "error": f"Tool '{tool_name}' 执行超时"}
-        except Exception as e:
-            return {"success": False, "error": str(e)}
+```text
+Task
+→ Skill 匹配 + Memory 检索
+→ Planner
+→ MCP Tool 查找候选
+→ Built-in Tool 检查文件
+→ Plugin Tool 汇总
+→ Human Approval Gate
+→ Plugin Tool 生成变更建议
+→ Handoff 给 Review Subagent
+→ Event Bus 发布父子任务事件
+→ 组合结果
+→ Memory / Trace / Checkpoint
 ```
+
+源码位于：
+
+- [Enhanced Agent 示例说明](https://github.com/dollarser/modern-ai-agent-architecture/tree/main/examples/enhanced-agent)
+- [Python 组装实现](https://github.com/dollarser/modern-ai-agent-architecture/blob/main/examples/enhanced-agent/python/assembly.py)
+- [TypeScript 组装实现](https://github.com/dollarser/modern-ai-agent-architecture/blob/main/examples/enhanced-agent/typescript/assembly.ts)
+
+### 7.1 运行方式
+
+```bash
+# Python
+cd examples/enhanced-agent/python
+python main.py
+python -m unittest -v test_main.py
+
+# TypeScript
+cd ../typescript
+npm install
+npm run build
+npm test
+npm start
+```
+
+入口程序先中断，再用同一个 Session 从 JSON Checkpoint 恢复。默认 Adapter 和 Tool 都是确定性的，不需要 API Key。
+
+### 7.2 已验证契约
+
+| 契约 | 测试保证 |
+|------|----------|
+| Skill 和 Memory 在规划前加载 | Planner 收到 Skill 指令和长期记忆检索结果 |
+| 扩展来源可追踪 | MCP Tool 标记 `mcp`，Plugin Tool 标记 `plugin` |
+| Tool 状态受 Router 控制 | Disabled Tool 不向 Planner 暴露，也不能执行 |
+| Plugin 可以卸载 | Plugin Tool、Skill 和 Hook 按 Owner 移除 |
+| 审批位于副作用之前 | 拒绝时 Handler 调用次数为零 |
+| Guard 与 Observer 语义不同 | Guard fail-closed；Observer 错误隔离 |
+| Handoff 保留父子关系 | Event Bus 和结果包含父 Session / Trace 信息 |
+| Checkpoint 真正恢复 | Plan、结果、审批、计数与 Trace 从新实例恢复 |
+| 失败不误报成功 | 只有 `status=completed` 返回 `success=true` |
+| Python / TypeScript 契约一致 | 两套测试覆盖相同端到端场景 |
 
 ---
 
-## 5. 状态持久化
+## 8. 性能与韧性边界
 
-### 5.1 检查点系统
+本章保留依赖感知并行、结构化重试、Tool 超时和 Checkpoint，但需要明确边界：
 
-```python
-import sqlite3
-import uuid
-import json
-from datetime import datetime
-from typing import Optional
+| 能力 | 教学实现 | 生产环境还需要 |
+|------|----------|----------------|
+| 并行 | 只并行依赖已满足的步骤 | 限流、背压、资源池、取消传播 |
+| 重试 | 只重试 `retryable=true` | 幂等键、错误分类、Retry-After、抖动退避 |
+| 超时 | Runtime 停止等待 | Provider 取消协议和资源隔离 |
+| Checkpoint | JSON 原子替换 | 事务、并发控制、Schema 迁移、保留策略 |
+| Memory | 内存词项检索 | 持久化、Embedding、权限和遗忘策略 |
+| MCP | Fake Client | 真实 Transport、认证、能力协商和断线恢复 |
+| Plugin | 进程内加载 | 签名、沙箱、供应链治理和资源配额 |
+| Approval | 自动或脚本决定 | 身份、超时、委托、审计和 UI |
+| Event Bus | 内存发布/订阅 | 持久化、重放、消费确认和去重 |
 
-
-class CheckpointManager:
-    """检查点管理器 - 支持 Agent 状态持久化和恢复"""
-
-    def __init__(self, db_path: str = "agent_checkpoints.db"):
-        self.conn = sqlite3.connect(db_path)
-        self.conn.row_factory = sqlite3.Row
-        self._init_db()
-
-    def _init_db(self):
-        self.conn.executescript("""
-            CREATE TABLE IF NOT EXISTS checkpoints (
-                id TEXT PRIMARY KEY,
-                session_id TEXT NOT NULL,
-                state TEXT,
-                step_count INTEGER DEFAULT 0,
-                memory TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-            CREATE INDEX IF NOT EXISTS idx_checkpoint_session
-                ON checkpoints(session_id, created_at DESC);
-        """)
-        self.conn.commit()
-
-    def save(self, session_id: str, agent_state: dict) -> str:
-        cid = f"{session_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
-        self.conn.execute(
-            """INSERT INTO checkpoints (id, session_id, state, step_count, memory)
-               VALUES (?, ?, ?, ?, ?)""",
-            (cid, session_id, json.dumps(agent_state.get("state", {})),
-             agent_state.get("step_count", 0),
-             json.dumps(agent_state.get("memory", []), ensure_ascii=False))
-        )
-        self.conn.commit()
-        return cid
-
-    def load(self, session_id: str) -> Optional[dict]:
-        cursor = self.conn.execute(
-            "SELECT * FROM checkpoints WHERE session_id = ? "
-            "ORDER BY created_at DESC LIMIT 1",
-            (session_id,)
-        )
-        row = cursor.fetchone()
-        if row:
-            return {
-                "id": row["id"], "session_id": row["session_id"],
-                "state": json.loads(row["state"]),
-                "step_count": row["step_count"],
-                "memory": json.loads(row["memory"]),
-                "created_at": row["created_at"]
-            }
-        return None
-
-    def cleanup(self, session_id: str, keep_latest: int = 5):
-        self.conn.execute("""
-            DELETE FROM checkpoints WHERE session_id = ? AND id NOT IN (
-                SELECT id FROM checkpoints WHERE session_id = ?
-                ORDER BY created_at DESC LIMIT ?
-            )
-        """, (session_id, session_id, keep_latest))
-        self.conn.commit()
-```
-
----
-
-## 6. 错误处理与韧性
-
-### 6.1 熔断器
-
-```python
-class CircuitBreaker:
-    """熔断器 - 防止级联故障"""
-
-    def __init__(self, threshold: int = 5, recovery_time: float = 60.0):
-        self.threshold = threshold
-        self.recovery_time = recovery_time
-        self._failures: dict[str, list[float]] = {}
-        self._open_circuits: dict[str, float] = {}
-
-    def record_failure(self, name: str):
-        now = time.time()
-        self._failures.setdefault(name, []).append(now)
-        self._failures[name] = [
-            t for t in self._failures[name] if now - t < self.recovery_time
-        ]
-        if len(self._failures[name]) >= self.threshold:
-            self._open_circuits[name] = now
-
-    def record_success(self, name: str):
-        self._failures.pop(name, None)
-        self._open_circuits.pop(name, None)
-
-    def is_open(self, name: str) -> bool:
-        if name not in self._open_circuits:
-            return False
-        if time.time() - self._open_circuits[name] > self.recovery_time:
-            self._open_circuits.pop(name, None)
-            self._failures.pop(name, None)
-            return False
-        return True
-
-
-class ResilientExecutor:
-    """韧性执行器 - 带重试和熔断"""
-
-    def __init__(self, max_retries: int = 3, backoff_base: float = 1.0):
-        self.max_retries = max_retries
-        self.backoff_base = backoff_base
-        self.circuit_breaker = CircuitBreaker()
-
-    async def execute(self, tool_name: str, args: dict, registry) -> dict:
-        if self.circuit_breaker.is_open(tool_name):
-            return {"success": False, "error": f"Tool '{tool_name}' 已熔断，请稍后重试"}
-
-        last_error = None
-        for attempt in range(self.max_retries + 1):
-            try:
-                result = await asyncio.to_thread(registry.execute, tool_name, args)
-                if result.get("success"):
-                    self.circuit_breaker.record_success(tool_name)
-                return result
-            except Exception as e:
-                last_error = str(e)
-                if attempt < self.max_retries:
-                    await asyncio.sleep(self.backoff_base * (2 ** attempt))
-
-        self.circuit_breaker.record_failure(tool_name)
-        return {"success": False, "error": f"执行失败(已重试{self.max_retries}次): {last_error}"}
-```
-
----
-
-## 7. 增强版 Agent 完整实现
-
-```python
-class EnhancedAgent:
-    """增强版 Agent - 完整实现
-
-    注意：本节代码引用本章前文定义的组件（CheckpointManager、ParallelExecutor、
-    ResilientExecutor、SkillRegistry 等），完整可运行版本见 examples/ 目录。
-    """
-
-    def __init__(self, config: dict):
-        self.config = config
-        self.step_count = 0
-        self.llm = self._create_llm(config)
-        self.planner = LLMPlanner(self.llm)
-        self.tools = ToolRegistry()
-        self.memory = Memory()
-        self.hooks = HookSystem()
-        self.executor = ParallelExecutor()
-        self.checkpoint = CheckpointManager()
-        self.resilient = ResilientExecutor()
-        self.skills = SkillRegistry()
-        self._setup()
-
-    def _create_llm(self, config: dict) -> LLMProvider:
-        provider = config.get("llm_provider", "openai")
-        if provider == "openai":
-            return OpenAIProvider(api_key=config["api_key"], model=config["model"])
-        elif provider == "anthropic":
-            return AnthropicProvider(api_key=config["api_key"], model=config["model"])
-        raise ValueError(f"Unknown provider: {provider}")
-
-    def _setup(self):
-        self._register_builtin_tools()
-        self.hooks.on("before_execute", lambda ctx, step: print(f"  [Exec] {step.get('description', '')}"))
-        self.hooks.on("after_execute", lambda ctx, step, result: print(f"  [Done] {'✓' if result.get('success') else '✗'}"))
-
-    async def run(self, task: str, session_id: str = None) -> dict:
-        session_id = session_id or str(uuid.uuid4())
-        start_time = time.time()
-
-        print(f"\n{'='*70}")
-        print(f"  Enhanced Agent [{session_id[:8]}]")
-        print(f"{'='*70}")
-
-        # 尝试恢复
-        cp = self.checkpoint.load(session_id)
-        if cp:
-            print(f"  📍 从检查点恢复: {cp['id']}")
-
-        self.memory.add("user", task, importance=5)
-
-        try:
-            while self.step_count < self.config.get("max_steps", 10):
-                self.step_count += 1
-
-                # 1. Reasoning（LLM 响应用于上下文记录，实际规划由 Planner 独立完成）
-                self.hooks.trigger("before_reasoning", self)
-                tools_def = self.tools.get_definitions()
-                response = await self.llm.chat(
-                    self._build_messages(), tools=tools_def
-                )
-                self.hooks.trigger("after_reasoning", self, response)
-
-                # 2. Planning
-                plan = await self.planner.create_plan(task, tools_def)
-
-                # 3. Execute
-                results = await self.executor.execute_with_deps(
-                    plan["plan"], self.tools
-                )
-                for step, result in zip(plan["plan"], results):
-                    self.memory.add("tool", json.dumps(result, ensure_ascii=False))
-
-                # 4. Checkpoint
-                self.checkpoint.save(session_id, {
-                    "state": {"task": task, "plan": plan},
-                    "step_count": self.step_count,
-                    "memory": [{"role": m.role, "content": m.content[:200]}
-                              for m in self.memory.short_term]
-                })
-
-                if all(r.get("success") for r in results):
-                    break
-
-        except Exception as e:
-            return {"success": False, "error": str(e), "session_id": session_id}
-
-        elapsed = time.time() - start_time
-        result = {
-            "success": True, "session_id": session_id,
-            "elapsed": f"{elapsed:.1f}s", "steps": self.step_count
-        }
-        print(f"  ✅ 完成 | {elapsed:.1f}s | {self.step_count} 步")
-        print(f"{'='*70}\n")
-        return result
-
-    def _build_messages(self) -> list[dict]:
-        messages = [
-            {"role": "system", "content": self.config.get("instructions", "")}
-        ]
-        for entry in list(self.memory.short_term)[-15:]:
-            messages.append({"role": entry.role, "content": entry.content[:2000]})
-        return messages
-```
-
----
-
-## 8. 性能优化策略
-
-| 策略 | 实现方式 | 主要影响与验证方式 |
-|------|---------|--------------------|
-| 并行 Tool 调用 | 依赖拓扑排序 + `asyncio.gather` | 可能缩短关键路径；验证依赖、限流与部分失败 |
-| 流式输出 | `AsyncIterator` 逐 token 返回 | 改善首个可见结果时间；不等同于降低总耗时 |
-| Tool 结果缓存 | 仅对读操作按输入、权限与时效缓存 | 减少重复调用；验证失效和越权复用 |
-| 上下文压缩 | 对旧消息生成可追溯摘要 | 可能减少输入 Token；回归测试信息损失 |
-| 连接池复用 | HTTP 连接池 | 可能减少连接开销；观察连接泄露与下游限流 |
-| 预加载 Skills | 后台异步匹配 | 以命中率与额外 Context 成本决定是否启用 |
+不能因为 Runtime 超时就假设外部副作用已经取消，也不能因为 Checkpoint 保存成功就假设 Tool 事务一定提交。副作用 Tool 必须提供幂等键，并记录可核对的执行标识。
 
 ---
 
 ## 9. 最佳实践
 
-1. **渐进式增强：** 从 MVP 开始，每次只增强一个维度，充分测试后再继续。
-2. **错误处理优先：** 在生产环境中，完善的错误处理比新功能更重要。
-3. **监控先行：** 在增强功能之前建立 Tracing 和指标收集。
-4. **性能基准：** 每次增强后测量性能，确保无回归。
+1. **让 Runtime 依赖 Port：** SDK、数据库和 UI 都留在 Adapter 内。
+2. **只有一个 Composition Root：** 组件创建与业务执行分离。
+3. **扩展统一进入 Context、Hook 或 Tool Registry：** 不允许 Plugin 修改 Runtime 私有状态。
+4. **执行时重新授权：** 规划时可见不代表执行时仍然允许。
+5. **审批先于副作用：** 拒绝必须保证 Handler 没有被调用。
+6. **恢复时防止重复副作用：** 保存审批、步骤结果和幂等标识。
+7. **明确教学 Adapter 的边界：** Fake MCP、内存 Memory 和自动审批不能包装成生产能力。
 
 ---
 
 ## 10. 官方参考
 
-| 编号 | 来源 | 类型 | 说明 |
-|------|------|------|------|
-| REF-1 | [OpenAI Agents SDK](https://openai.github.io/openai-agents-python/) | 官方文档 | 增强版 Agent 参考实现 |
-| REF-2 | [LangGraph Persistence](https://langchain-ai.github.io/langgraph/how-tos/persistence/) | 官方文档 | 状态持久化实现 |
-| REF-3 | [Circuit Breaker Pattern](https://martinfowler.com/bliki/CircuitBreaker.html) | 博文 | 熔断器模式 |
+| 参考 | 类型 | 本章用途 |
+|------|------|----------|
+| [Model Context Protocol](https://modelcontextprotocol.io/) | 官方规范 | MCP Client、Tool 发现与调用边界 |
+| [OpenAI Agents SDK](https://openai.github.io/openai-agents-python/) | 官方文档 | Agent、Handoff、Guardrail 和 Tracing 设计参考 |
+| [Anthropic Building Effective Agents](https://www.anthropic.com/research/building-effective-agents) | 官方文章 | Workflow、Agent 与编排模式取舍 |
+| [OpenTelemetry](https://opentelemetry.io/docs/) | 官方文档 | Trace、Metrics 与上下文传播 |
 
 ---
 
 ## 本章小结
 
-增强版 Agent 展示了多个组件如何通过稳定接口组合，但“功能更多”不等于“系统更可靠”。每次增强都应对应一个已观察到的失败模式，并同时补上配置、追踪、资源限制和回归测试，避免把教学组合实现误当作生产框架。
+第 16 章不再提供一份与前文割裂的“超级 Agent”伪代码，而是把第 7～15 章的能力收敛为可替换 Port，并提供真实的离线最小 Adapter。Skills、Memory、MCP、Plugin、Hooks、Approval、Handoff、Subagent、Event Bus、Checkpoint 和 Runtime 已进入同一条可测试链路。
+
+这使示例达到了“功能闭环完整”：组件能注册、调用、拒绝、卸载、恢复和追踪；同时它仍然诚实地不是生产基础设施完整版。生产化工作应在不修改 Runtime 契约的前提下替换 Adapter。
 
 ---
 
 ## 本章 Checklist
 
-- [ ] 理解 MVP 到 Enhanced 的 10 个升级维度
-- [ ] 能实现 LLM 驱动的动态规划器
-- [ ] 能实现依赖感知的并行执行器
-- [ ] 能实现状态持久化和中断恢复
-- [ ] 理解熔断器和韧性策略
-- [ ] 运行了增强版 Agent 示例代码
+- [ ] 能解释 Port、Adapter 与 Composition Root 的职责
+- [ ] 能替换 `MemoryBackend` 而不修改 Runtime
+- [ ] 能区分 Guard Hook 与 Observer Hook 的失败策略
+- [ ] 能通过 Tool 来源和状态完成 Router 过滤
+- [ ] 能把 MCP Tool 转换并注册到统一 Tool Registry
+- [ ] 能加载和卸载 Plugin Tool、Skill 与 Hook
+- [ ] 能保证审批拒绝后 Tool Handler 不执行
+- [ ] 能完成一次带父子 Trace 的 Handoff
+- [ ] 能从 Checkpoint 恢复且不重复审批已完成步骤
+- [ ] 能说明教学实现与生产基础设施之间的边界

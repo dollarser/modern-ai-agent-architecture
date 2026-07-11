@@ -83,6 +83,7 @@ Agent Runtime - 完整实现
 """
 
 import time
+import concurrent.futures
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Optional
@@ -94,6 +95,7 @@ class RunState(Enum):
     PAUSED = "paused"
     ERROR = "error"
     FINISHED = "finished"
+    EXHAUSTED = "exhausted"
     CANCELLED = "cancelled"
 
 
@@ -179,10 +181,8 @@ class AgentRuntime:
             self._trigger("on_cancel", self.context)
 
     def finish(self, result: Any = None) -> RunContext:
-        """完成"""
+        """收尾并记录指标；不得覆盖取消、暂停、错误或耗尽状态。"""
         if self.context:
-            if self.context.state != RunState.ERROR:
-                self.context.state = RunState.FINISHED
             self.context.metrics["total_time"] = (
                 time.time() - self.context.start_time
             )
@@ -197,6 +197,8 @@ class AgentRuntime:
             executor: Callable) -> RunContext:
         """运行 Agent 主循环"""
         self.start(task)
+        result = None
+        completed = False
 
         try:
             while self._should_continue():
@@ -219,8 +221,7 @@ class AgentRuntime:
                     if not self._should_continue():
                         break
 
-                    step_start = time.time()
-                    self._check_timeout(step_start)
+                    self._check_timeout()
                     self._trigger("before_execute", self.context, step)
                     result = self._execute_with_retry(executor, step)
                     self._trigger("after_execute", self.context, step, result)
@@ -229,7 +230,15 @@ class AgentRuntime:
 
                 # 4. 判断是否完成
                 if result is not None and self._is_complete(result):
+                    completed = True
+                    self.context.state = RunState.FINISHED
                     break
+
+            if self.context.state == RunState.RUNNING and not completed:
+                self.context.state = RunState.EXHAUSTED
+                self.context.errors.append(
+                    f"达到最大 Tool 步数 ({self.config.max_steps})，任务尚未完成"
+                )
 
         except TimeoutError:
             self.context.state = RunState.ERROR
@@ -249,17 +258,39 @@ class AgentRuntime:
             and self.context.step_count < self.config.max_steps
         )
 
-    def _check_timeout(self, step_start_time: float = None):
-        """检查超时"""
+    def _check_timeout(self):
+        """检查总执行时间；单步超时由 Future 等待负责。"""
         if not self.context:
             return
         elapsed = time.time() - self.context.start_time
         if elapsed > self.config.total_timeout:
             raise TimeoutError(f"总执行时间超时 ({self.config.total_timeout}s)")
-        if step_start_time is not None:
-            step_elapsed = time.time() - step_start_time
-            if step_elapsed > self.config.step_timeout:
-                raise TimeoutError(f"单步执行超时 ({self.config.step_timeout}s)")
+
+    def _remaining_timeout(self) -> float:
+        """单步上限不能超过本次运行的剩余总时间。"""
+        if not self.context:
+            raise RuntimeError("Runtime 尚未启动")
+        remaining = self.config.total_timeout - (
+            time.time() - self.context.start_time
+        )
+        if remaining <= 0:
+            raise TimeoutError(f"总执行时间超时 ({self.config.total_timeout}s)")
+        return min(self.config.step_timeout, remaining)
+
+    def _execute_once(self, executor: Callable, step: Any) -> Any:
+        """在独立工作线程中等待一步，超时后立即把控制权还给 Runtime。"""
+        pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        future = pool.submit(executor, self.context, step)
+        try:
+            return future.result(timeout=self._remaining_timeout())
+        except concurrent.futures.TimeoutError as exc:
+            future.cancel()
+            raise TimeoutError(
+                f"单步执行超时 ({self.config.step_timeout}s)"
+            ) from exc
+        finally:
+            # 不等待已经开始的线程；生产 Tool 仍需实现协作式取消和资源隔离。
+            pool.shutdown(wait=False, cancel_futures=True)
 
     def _execute_with_retry(self, executor: Callable,
                             step: Any) -> Any:
@@ -267,10 +298,14 @@ class AgentRuntime:
         last_error = None
         for attempt in range(self.config.max_retries + 1):
             try:
-                return executor(self.context, step)
+                return self._execute_once(executor, step)
+            except TimeoutError:
+                # 底层工作可能仍在运行，未知副作用不得自动重试。
+                raise
             except Exception as e:
                 last_error = e
                 if attempt < self.config.max_retries:
+                    self._check_timeout()
                     time.sleep(0.5 * (attempt + 1))  # 退避
         raise last_error
 
@@ -346,6 +381,14 @@ if __name__ == "__main__":
     main()
 ```
 
+可运行并带契约测试的双语言版本位于 `examples/runtime/`。它验证只有 `done=true` 才进入 `FINISHED`，并覆盖 `EXHAUSTED`、`CANCELLED` 与单步超时：
+
+```bash
+python examples/runtime/python/main.py
+python -m unittest discover -s examples/runtime/python -p 'test_*.py' -v
+npm --prefix examples/runtime/typescript test
+```
+
 ---
 
 ## 3. 并发控制
@@ -396,19 +439,33 @@ class ParallelRuntime(AgentRuntime):
     def execute_parallel(self, tool_calls: list[dict]) -> list[dict]:
         """并行执行多个 Tool 调用"""
         results = []
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-            futures = {
-                executor.submit(self._execute_with_retry, self._execute, tc): tc
-                for tc in tool_calls
-            }
-            for future in concurrent.futures.as_completed(futures):
-                try:
-                    result = future.result(timeout=self.config.step_timeout)
-                    results.append(result)
-                except Exception as e:
-                    results.append({"error": str(e)})
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=5)
+        futures = {
+            executor.submit(self._execute_with_retry, self._execute, tc): tc
+            for tc in tool_calls
+        }
+        done, not_done = concurrent.futures.wait(
+            futures,
+            timeout=self._remaining_timeout()
+        )
+        for future in done:
+            try:
+                results.append(future.result())
+            except Exception as e:
+                results.append({"success": False, "error": str(e)})
+        for future in not_done:
+            future.cancel()
+            tool_call = futures[future]
+            results.append({
+                "success": False,
+                "tool": tool_call.get("name", "unknown"),
+                "error": f"并行批次超时 ({self.config.step_timeout}s)"
+            })
+        executor.shutdown(wait=False, cancel_futures=True)
         return results
 ```
+
+> **超时边界：** 线程 Future 超时只能保证 Runtime 不再等待，不能强制终止已经开始的底层调用。生产级 Tool 必须同时具备请求级超时、协作式取消、资源隔离和幂等键；发生未知副作用的超时不得自动重试。
 
 ---
 
@@ -427,6 +484,7 @@ class ParallelRuntime(AgentRuntime):
 | 反模式 | 风险 | 推荐方案 |
 |--------|------|---------|
 | 无超时控制 | Agent 无限执行 | 多层超时：步骤 + 总时间 + Token |
+| 达到步数上限仍标记完成 | 调用方误判任务成功 | 使用 `EXHAUSTED` 等独立终态，只有满足完成条件才进入 `FINISHED` |
 | 静默吞错误 | 问题隐藏，难以调试 | 记录所有错误，支持告警 |
 | 同步阻塞 | 响应慢 | 独立 Tool 并行执行 |
 | 状态不可恢复 | 中断后无法继续 | 支持状态序列化和恢复 |

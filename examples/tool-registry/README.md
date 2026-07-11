@@ -4,7 +4,7 @@
 理解动态 Tool 注册、标签分类、关键词搜索、OpenAI 格式定义生成与动态注销
 
 ## 前置知识
-- 第 13 章「Tool Registry」
+- 第 11 章「Tool Registry」
 - 第 6 章「Tools 与 Function Calling」
 
 ## 运行方式
@@ -27,5 +27,5 @@ npm run start
 注册 4 个带标签的 Tool（search_web、read_file、search_files、calculate），展示按标签过滤、关键词搜索、动态注销和 OpenAI 格式定义生成。
 
 ## 相关章节
-- 第 13 章 Tool Registry
+- 第 11 章 Tool Registry
 - 第 6 章 Tools 与 Function Calling

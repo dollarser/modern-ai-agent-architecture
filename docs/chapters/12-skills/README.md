@@ -64,7 +64,7 @@ Skill = 工作流模板 + 领域知识 + 约束条件 + 输出规范
 | 操作 | 被 Agent 读取，加载到上下文 | 被 Agent 调用，执行操作 |
 | 输出 | 指导性文本 | 结构化执行结果 |
 | 类比 | 菜谱（告诉你怎么做） | 厨具（真正去做） |
-| 触发时机 | Host 或 Agent 选择加载时，通常在规划前后按需进入 Context | 执行阶段由 Host / Agent 调用 |
+| 触发时机 | Host 或 Agent 在规划前按需加载；任务变化或重新规划时可再次匹配 | 执行阶段由 Host / Agent 调用 |
 | 直接副作用 | 仅加载指令本身不执行动作；遵循 Skill 的 Agent 仍可能调用 Tool | 可修改文件、调用 API 或产生其他外部副作用 |
 | 可组合性 | 可嵌套引用 | 可链式调用 |
 | 版本管理 | 工作流版本 | 接口版本 |
@@ -91,18 +91,20 @@ graph TD
 
 ```mermaid
 flowchart TD
-    Prompt[接收 Prompt] --> Reason[Reasoning]
-    Reason --> Plan[Planning]
-    Plan --> Match{Skill 匹配?}
+    Prompt[接收 Prompt] --> Match{Skill 匹配?}
     Match -->|是| Load[加载 Skill 到上下文]
-    Match -->|否| Direct[直接执行]
-    Load --> Execute[Execute: Tool Calling]
-    Direct --> Execute
+    Match -->|否| Context[构建基础上下文]
+    Load --> Context
+    Context --> Reason[Reasoning]
+    Reason --> Plan[Planning]
+    Plan --> Execute[Execute: Tool Calling]
     Execute --> Observe[Observation]
-    Observe --> Reason
+    Observe --> Replan{需要重新规划?}
+    Replan -->|是| Match
+    Replan -->|否| Finish[完成]
 ```
 
-> **图 12-2：** Skill 在 Agent 主循环中的位置。在 Planning 阶段，Agent 判断是否需要加载 Skill；Skill 加载后进入上下文，指导后续的 Tool Calling。
+> **图 12-2：** Skill 在 Agent 主循环中的位置。Agent 先根据任务匹配 Skill，将命中的工作流指令加载到 Context，再进行 Reasoning 和 Planning，使 Skill 能参与计划生成；任务条件变化或重新规划时可以再次匹配。第 16 章 Enhanced Agent 采用这一时序。
 
 ### 2.3 Skill 的生命周期
 
@@ -112,8 +114,8 @@ flowchart TD
 
 - **定义：** 开发者编写 Skill 模板
 - **注册：** Skill 被注册到 Skill Registry
-- **匹配：** Agent 在 Planning 阶段判断当前任务是否匹配某个 Skill
-- **加载：** 匹配的 Skill 内容被加载到 Agent 上下文
+- **匹配：** Agent 在首次规划前判断当前任务是否匹配某个 Skill；重新规划时可按新状态再次匹配
+- **加载：** 匹配的 Skill 内容先进入 Agent 上下文，再参与推理和计划生成
 - **使用：** Agent 按照 Skill 的工作流指导执行任务
 - **卸载：** 任务完成后，Skill 内容从上下文中移除（或保留到 Session 结束）
 

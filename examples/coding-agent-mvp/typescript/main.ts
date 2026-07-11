@@ -230,7 +230,7 @@ class CodingAgent {
     this.memory.add("user", prompt);
 
     console.log(`\n${"=".repeat(60)}`);
-    console.log(`  Coding Agent MVP`);
+    console.log(`  Coding Agent 组合预览`);
     console.log(`${"=".repeat(60)}`);
     console.log(`  任务: ${prompt}`);
     console.log(`  可用 Tool: ${this.toolRegistry.listAll()}`);

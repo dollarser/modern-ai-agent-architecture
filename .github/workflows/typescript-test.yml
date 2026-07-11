@@ -1,0 +1,52 @@
+name: TypeScript Test
+
+on:
+  push:
+    paths:
+      - 'examples/**/*.ts'
+      - 'examples/**/package.json'
+      - 'examples/**/package-lock.json'
+      - 'examples/**/tsconfig.json'
+  pull_request:
+    paths:
+      - 'examples/**/*.ts'
+      - 'examples/**/package.json'
+      - 'examples/**/package-lock.json'
+      - 'examples/**/tsconfig.json'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: ['18', '20', '22']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+          cache-dependency-path: 'examples/*/typescript/package-lock.json'
+
+      - name: Build and test all TypeScript examples
+        shell: bash
+        run: |
+          for example_dir in examples/*/typescript/; do
+            echo "=== Testing $example_dir ==="
+            npm --prefix "$example_dir" ci
+            npm --prefix "$example_dir" run build
+            npm --prefix "$example_dir" test --if-present
+          done
+
+      - name: Verify all TypeScript examples have lockfiles
+        shell: bash
+        run: |
+          for example_dir in examples/*/typescript/; do
+            if [ ! -f "$example_dir/package-lock.json" ]; then
+              echo "ERROR: $example_dir is missing package-lock.json"
+              exit 1
+            fi
+          done
