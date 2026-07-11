@@ -15,7 +15,7 @@
 | MCP Server | `examples/mcp-server/` | Tool 暴露, 协议实现 | Python, TypeScript | 第 13 章 |
 | Tool Registry | `examples/tool-registry/` | 动态注册, 路由 | Python, TypeScript | 第 11 章 |
 | Agent MVP Minimal | `examples/agent-mvp-minimal/` | 任务、规则规划、内置 Tool、观察与终止条件 | Python, TypeScript | 第5--7章 |
-| Coding Agent MVP | `examples/coding-agent-mvp/` | 轻量 Memory、Tool 映射与回调的组合预览 | Python, TypeScript | 第7, 15--16章 |
+| Coding Agent 组合预览 | `examples/coding-agent-mvp/` | 轻量 Memory、Tool 映射与回调的补充演示（非最终架构） | Python, TypeScript | 第 8--11、15--16 章 |
 
 ## 运行方式
 

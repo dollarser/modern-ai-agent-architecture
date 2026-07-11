@@ -376,32 +376,18 @@ class TreeOfThoughts:
 ### 4.1 Plan-and-Execute 模式
 
 ```mermaid
-flowchart LR
-    subgraph Planning["规划阶段"]
-        direction TB
-        Task[接收任务] --> Analyze[分析任务需求]
-        Analyze --> Decompose[分解为子任务]
-        Decompose --> Schedule[制定执行顺序]
-    end
-
-    subgraph Running["执行循环"]
-        direction TB
-        Select[选择下一子任务] --> Execute[执行子任务]
-        Execute --> Check{结果符合预期?}
-        Check -->|否| Replan[调整剩余计划]
-        Replan --> Select
-        Check -->|是| Complete[记录步骤结果]
-        Complete --> Next{还有子任务?}
-        Next -->|是| Select
-    end
-
-    subgraph Finish["收尾阶段"]
-        direction TB
-        Verify[验证最终结果] --> Done[输出结果]
-    end
-
-    Schedule --> Select
-    Next -->|否| Verify
+flowchart TD
+    Task[接收任务] --> Analyze[分析任务需求]
+    Analyze --> Decompose[分解为子任务]
+    Decompose --> Schedule[制定执行顺序]
+    Schedule --> Execute[逐步执行]
+    Execute --> Check{执行结果<br/>是否符合预期?}
+    Check -->|是| Next{还有<br/>子任务?}
+    Check -->|否| Replan[调整计划]
+    Replan --> Schedule
+    Next -->|是| Execute
+    Next -->|否| Verify[验证最终结果]
+    Verify --> Done[输出结果]
 ```
 
 > **图 5-3：** Plan-and-Execute 流程。任务分解 → 制定顺序 → 逐步执行 → 动态调整 → 验证结果。

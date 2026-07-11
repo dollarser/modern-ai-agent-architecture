@@ -54,40 +54,96 @@
 
 当任务仍是短、只读、确定且流量有限的流程时，第 7 章的 MVP 往往更可控。只有问题的收益足以覆盖上述运行与治理成本，才逐项升级，而不是一次性启用所有能力。
 
-**图 16-1：增强版 Agent 分层架构**
+### 1.2 从第 7 章 MVP 到最终功能架构
+
+下面这张图是全书组件完成组装后的**能力总览**，不是要求每个 Agent 都启用全部模块。实线表示主要数据或控制流，虚线表示按需加载、治理或观测关系；外部 Provider、MCP Server 和业务系统不属于 Agent Host 内部。
 
 ```mermaid
-graph TD
-    subgraph Interface["Interface Layer"]
-        S[流式输出]
-    end
-    subgraph Orchestration["Orchestration Layer"]
-        R[LLM 推理]
-        P[动态规划]
-    end
-    subgraph Execution["Execution Layer"]
-        PT[并行 Tool 调用]
-        TR[Tool Registry]
-        MCP[MCP 集成]
-        SK[Skills 匹配]
-    end
-    subgraph StateLayer["State Layer"]
-        PS[持久化]
-        CK[Checkpoint]
-        MM[Memory]
-    end
-    subgraph Infra["Infrastructure Layer"]
-        T[Tracing]
-        CB[熔断器]
-        HK[Hooks]
+flowchart LR
+    Entry["User / API / UI"] --> Input["Task / Prompt"]
+
+    subgraph Host["Agent Host（最终能力总览）"]
+        subgraph ContextLayer["输入与上下文｜第 3--4、12 章"]
+            Input --> Context["Context Manager"]
+            Instructions["Instructions"] --> Context
+            SkillLoader["Skill Loader"] -.按需加载.-> Context
+        end
+
+        subgraph Harness["Harness / Runtime｜第 7、9--10、16--17 章"]
+            Runtime["Runtime Loop<br/>预算・超时・重试・暂停恢复"]
+            Reasoning["Reasoning"]
+            Planner["Planner<br/>计划与依赖"]
+            TaskState["Task State / Checkpoint"]
+            ModelAdapter["LLM Adapter"]
+            Runtime --> Reasoning --> Planner --> Runtime
+            Runtime <--> TaskState
+            Runtime <--> ModelAdapter
+        end
+
+        subgraph Execution["执行与扩展｜第 6、11、13--14 章"]
+            Router["Tool Router"] --> Registry["Tool Registry"]
+            Registry --> Builtins["Built-in Tools"]
+            Registry --> Plugin["Plugin Tools"]
+            Registry --> MCPClient["MCP Client"]
+        end
+
+        subgraph StateKnowledge["状态与知识｜第 4、8、16 章"]
+            Memory["Memory<br/>短期・工作・长期"]
+            Knowledge["Knowledge / RAG"]
+            Store[("Persistent Store")]
+            Memory <--> Store
+            Knowledge <--> Store
+        end
+
+        subgraph Orchestration["编排｜第 15--16 章"]
+            Coordinator["Coordinator / Handoff"]
+            Subagents["Subagents"]
+            EventBus["Event Bus"]
+            Coordinator <--> Subagents
+            Coordinator <--> EventBus
+        end
+
+        subgraph Governance["治理与可观测性｜第 10、16--18 章"]
+            Guardrails["Guardrails / Policy"]
+            Approval["Human Approval"]
+            Observability["Hooks・Tracing・Metrics・Audit"]
+        end
+
+        Context --> Runtime
+        Runtime --> Router
+        Router --> Runtime
+        Runtime <--> Memory
+        Context <--> Knowledge
+        Runtime <--> Coordinator
+        Guardrails -.约束.-> Runtime
+        Guardrails -.过滤.-> Router
+        Approval -.批准副作用.-> Runtime
+        Observability -.观测.-> Runtime
+        Observability -.审计.-> Router
     end
 
-    Interface --> Orchestration
-    Orchestration --> Execution
-    Execution --> StateLayer
-    Infra -.-> Orchestration
-    Infra -.-> Execution
+    subgraph External["外部系统边界"]
+        Provider["LLM Provider"]
+        MCPServers["MCP Servers"]
+        Business["Filesystem / API / Database"]
+    end
+
+    ModelAdapter <--> Provider
+    MCPClient <--> MCPServers
+    Builtins --> Business
+    Plugin --> Business
 ```
+
+> **图 16-1：** 从 MVP 演进而来的最终 Agent 能力总览。第 7 章的 `Runtime → Planner → Tool → Observation` 是中轴；第 8--11 章补齐可靠运行，第 12--14 章增加扩展与互操作，第 15--17 章加入编排、模型驱动能力和生产治理。LLM Adapter 属于 Host 的集成边界，LLM Provider 位于外部。
+
+| 演进阶段 | 在图 16-1 中增加的能力 | 保持不变的核心契约 |
+|----------|--------------------------|--------------------|
+| 第 7 章：MVP | Task / Prompt、Instructions、简单 Runtime、Rule Planner、TaskState、Built-in Tool | 一次 Tool 调用对应一步；成功、失败和终止可区分 |
+| 第 8--11 章：可靠运行 | Memory、Checkpoint、超时/重试/恢复、Hooks、Tool Registry / Router | Runtime 仍协调决策、执行与 Observation |
+| 第 12--14 章：扩展与互操作 | Skill Loader、MCP Client、Plugin Tools | 扩展能力通过受控接口进入 Context 或 Registry |
+| 第 15--17 章：编排与生产 | Subagents、Event Bus、LLM Adapter、持久化、Guardrails、审批、Tracing | 外部副作用受权限和审批约束，状态与 Trace 可恢复、可审计 |
+
+图中的“最终”表示**能力集合完整**，不表示部署时必须全部开启。短、只读、确定的任务仍可以停留在第 7 章形态；只有出现动态决策、长任务、跨系统操作或治理需求时，才增加对应模块。
 
 ---
 
@@ -108,7 +164,7 @@ graph TD
     end
 ```
 
-> **图 16-2：** 增强版 Agent 架构。它展示可按需加入的 LLM 接口、并行执行、持久化、Tracing、Skills 与 MCP 集成，而不是要求所有部署同时启用这些能力。
+> **图 16-2：** 增强版 Agent 的单进程实现切片。它聚焦本章代码如何组合 LLM 接口、并行执行、持久化、Tracing、Skills 与 MCP；跨 Agent 编排、外部系统边界和治理控制以图 16-1 为准。
 
 ---
 

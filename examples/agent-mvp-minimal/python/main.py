@@ -16,13 +16,14 @@ class TaskState:
     step_count: int = 0
     observations: list[dict[str, Any]] = field(default_factory=list)
     finished: bool = False
+    error: str | None = None
 
 
 class RulePlanner:
     """用确定性规则展示“推理后生成计划”的位置。"""
 
-    def reason(self, task: str) -> str:
-        return f"任务需要先查找相关信息，再整理可读结论：{task}"
+    def reason(self, task: str, instructions: str) -> str:
+        return f"遵循约束“{instructions}”，先查找相关信息，再整理可读结论：{task}"
 
     def plan(self, task: str) -> list[ToolCall]:
         return [
@@ -65,7 +66,14 @@ class ToolDispatcher:
 
 
 class MinimalAgent:
-    def __init__(self, max_steps: int = 4) -> None:
+    def __init__(
+        self,
+        instructions: str = "只读取信息，不执行有副作用的操作",
+        max_steps: int = 4,
+    ) -> None:
+        if max_steps < 0:
+            raise ValueError("max_steps must be non-negative")
+        self.instructions = instructions
         self.max_steps = max_steps
         self.planner = RulePlanner()
         self.tools = ToolDispatcher()
@@ -73,8 +81,9 @@ class MinimalAgent:
     def run(self, task: str) -> TaskState:
         state = TaskState(task=task)
         print(f"task: {task}")
+        print(f"instructions: {self.instructions}")
 
-        thought = self.planner.reason(task)
+        thought = self.planner.reason(task, self.instructions)
         print(f"reason: {thought}")
 
         plan = self.planner.plan(task)
@@ -82,17 +91,23 @@ class MinimalAgent:
 
         for call in plan:
             if state.step_count >= self.max_steps:
+                state.error = f"达到最大步数: {self.max_steps}"
                 break
             state.step_count += 1
             print(f"execute: {call.name}")
             observation = self.tools.execute(call, state)
             state.observations.append(observation)
             print(f"observe: {observation}")
-            if not observation["ok"]:
+            if not observation.get("ok", False):
+                state.error = str(observation.get("error", "tool execution failed"))
                 break
+        else:
+            state.finished = True
 
-        state.finished = True
-        print(f"finish: steps={state.step_count}, finished={state.finished}")
+        print(
+            f"finish: steps={state.step_count}, "
+            f"finished={state.finished}, error={state.error}"
+        )
         return state
 
 

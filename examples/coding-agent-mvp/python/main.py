@@ -1,6 +1,6 @@
 """
-Coding Agent MVP - 完整组合版
-====================================
+Coding Agent - 跨组件组合预览（非最终架构）
+============================================
 组合轻量 Prompt、Instructions、Planner、Memory、
 Tool 映射与回调。此示例不实现 MCP Client。
 

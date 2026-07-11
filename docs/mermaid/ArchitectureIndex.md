@@ -12,6 +12,15 @@ User → Prompt → Instructions → Agent → Tool Calling → MCP Tools
 
 详见：[图 2-1] Agent 整体架构（第 2 章）
 
+### 最终功能完备架构
+
+```text
+Context → Runtime → Planner → Tool Router → Built-in / Plugin / MCP
+             ↕ Memory / Checkpoint / Orchestration / Governance
+```
+
+详见：[图 16-1：最终 Agent 能力总览](../chapters/16-enhanced-agent/README.md)
+
 ### Agent 主循环
 
 ```
@@ -49,8 +58,8 @@ Load → Read → Reasoning → Planning → Execute → Observe → Finish
 |------|------|------|
 | Function Calling | [图 6-1] Function Calling 时序图 | 第 6 章 |
 | Tool 调用决策 | [图 6-3] Tool 调用决策树 | 第 6 章 |
-| ReAct 循环 | [图 5-1] ReAct 循环 | 第 5 章 |
-| Plan-and-Execute | [图 5-2] Plan-and-Execute 流程 | 第 5 章 |
+| ReAct 循环 | [图 5-2] ReAct 循环 | 第 5 章 |
+| Plan-and-Execute | [图 5-3] Plan-and-Execute 流程 | 第 5 章 |
 | Context 管理 | [图 4-2] Context Window 管理策略 | 第 4 章 |
 
 ---

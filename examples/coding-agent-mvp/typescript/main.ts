@@ -1,6 +1,6 @@
 /**
- * Coding Agent MVP - Complete Agent Implementation
- * =================================================
+ * Coding Agent - Cross-component Preview (Not the Final Architecture)
+ * ====================================================================
  * Combines lightweight Prompt, Instructions, Planner, Memory,
  * Tool mapping and callbacks. It does not implement an MCP Client.
  *

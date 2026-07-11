@@ -5,7 +5,10 @@
 ## [Unreleased] - 2026-07-11
 
 ### 修正
-- 重排第 5 章图 5-1 为三列等高策略对比，并将图 5-3 拆为规划、执行循环和收尾三阶段，减少长图与回路线交叉。
+- 收敛第 7 章为单轮最小纵向闭环：统一正文与可运行示例，修正 Instructions、步数、失败状态、测试和运行路径语义，并移除提前拼装后续组件的重复实现。
+- 修正架构图索引中第 5 章 ReAct 与 Plan-and-Execute 的图号引用。
+- 修正第 7 章图 7-1 的组件边界：将简单 Runtime Loop 纳入 Agent MVP，并移除最小示例中尚不存在的 LLM Interface。
+- 重排第 5 章图 5-1 为三列等高策略对比，缩短图形高度并保留三种策略的核心差异。
 - 将 Mermaid CI 改为无需启动浏览器的语法解析，并为现有中文技术书排版提供项目级 Markdown Lint 规则。
 - 修正第 18 章将 MCP 简化为“只提供 Tool”的跨章概念冲突，并统一其与第 13 章的职责边界。
 - 将 Mermaid、Python 示例与链接 CI 从告警式检查改为真实失败门禁，新增 Mermaid 提取和内部链接检查脚本。
@@ -15,6 +18,7 @@
 - 修正 MkDocs 的文档根目录和许可证入口；严格构建现已可通过。
 
 ### 新增
+- 第 16 章补充从第 7 章 MVP 逐章演进而来的最终 Agent 能力总览，明确 Runtime、Context、模型、Tool/MCP/Plugin、状态、编排与治理边界。
 - 为全部 20 章增加章末小结，统一收束核心边界、适用条件和工程取舍。
 - 第 2 章补充 Scaffolding、Harness、Runtime 与 Orchestration 的职责图和术语边界。
 - 第 8 章补充 Agent Memory、Knowledge System 与 RAG 的边界及反模式。
@@ -30,7 +34,7 @@
 - 压缩第 18 章重复的文本树与 Mermaid 表达；统一双层初学者阅读路径、FAQ 索引命名和第 20 章定位；将第 19 章主观排名式措辞改为可核查的条件化描述。
 - 将 `PRD/BookSpec-1.0/` 补充为当前有效的书稿维护、审阅和验收规范；V7 仅保留为历史需求基线。
 - 重构为六部分学习路径：基础认知、构建首个 Agent、可靠运行、扩展与互操作、规模化与生产、案例与索引；MVP 前移至第 7 章，框架分析后移至第 19 章，并同步章节目录、链接、图号、学习路线和索引。
-- 新增 `examples/agent-mvp-minimal/` 的 Python 与 TypeScript 最小纵向切片；保留 `coding-agent-mvp` 作为完整组合版，并收紧其 MCP 能力声明。
+- 新增 `examples/agent-mvp-minimal/` 的 Python 与 TypeScript 最小纵向切片；保留 `coding-agent-mvp` 作为跨组件组合预览，并收紧其 MCP 能力声明。
 - 复核当前数量：20 个章节、45 张 Mermaid 图、10 个独立示例工程、20 个双语言入口和 158 个 Markdown 表格；同步修正主页与 BookSpec 指标。
 - 发布前复审：修复第 18 章的 Markdown 围栏，收紧第 19 章的产品断言，并移除 Memory、Context 预算、成本和模型示例中的不可泛化固定阈值与默认值。
 - 复核并优化流程图的方向和连接语义：将长链流程改为纵向主链，修正 Tool 路由评分、MCP/Plugin 选型和 Memory/RAG 决策关系，并补充 Mermaid 图方向规范。
