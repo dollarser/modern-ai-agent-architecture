@@ -1,7 +1,7 @@
 site_name: 现代 AI Agent 架构：从原理到生产实践
 site_description: 一本可持续维护、工程化、事实可验证的现代 AI Agent 技术参考书
 site_author: AI Agent Architecture Project
-site_url: https://dollarser.github.io/modern-ai-agent-architecture/
+site_url: https://blog.sunlingzhang.com/modern-ai-agent-architecture/
 repo_name: dollarser/modern-ai-agent-architecture
 repo_url: https://github.com/dollarser/modern-ai-agent-architecture
 edit_uri: edit/main/

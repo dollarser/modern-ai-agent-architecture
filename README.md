@@ -8,7 +8,7 @@
 
 ## 阅读与导航
 
-- [在线阅读](https://dollarser.github.io/modern-ai-agent-architecture/)
+- [在线阅读](https://blog.sunlingzhang.com/modern-ai-agent-architecture/)
 - [完整目录](docs/SUMMARY.md)
 - [前言](docs/PREFACE.md)
 - [学习路线](docs/roadmap/Roadmap.md)

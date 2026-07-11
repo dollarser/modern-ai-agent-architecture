@@ -21,15 +21,12 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install mermaid-cli
-        run: npm install -g @mermaid-js/mermaid-cli
+      - name: Install Mermaid parser
+        run: npm install --no-save --package-lock=false mermaid@11.16.0 jsdom@29.1.1
 
       - name: Extract Mermaid diagrams
         run: |
           python scripts/extract_mermaid.py . /tmp/mermaid-snippets
 
       - name: Validate Mermaid syntax
-        run: |
-          for diagram in /tmp/mermaid-snippets/*.mmd; do
-            mmdc -i "$diagram" -o "$diagram.svg"
-          done
+        run: node scripts/check_mermaid.mjs /tmp/mermaid-snippets

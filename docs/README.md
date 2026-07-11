@@ -37,7 +37,7 @@
 
 ### 在线阅读
 
-访问 [https://dollarser.github.io/modern-ai-agent-architecture/](https://dollarser.github.io/modern-ai-agent-architecture/)
+访问 [https://blog.sunlingzhang.com/modern-ai-agent-architecture/](https://blog.sunlingzhang.com/modern-ai-agent-architecture/)
 
 ### 本地运行
 

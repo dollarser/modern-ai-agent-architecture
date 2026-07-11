@@ -98,7 +98,6 @@ graph TD
     end
 
     Context -->|受预算与保留策略管理| Next[下一轮或任务结束]
-    end
 ```
 
 > **图 3-1：** Prompt 与 Instructions 在上下文中的关系。Host 将版本化 Instructions 和当前 Prompt 组装为执行上下文；是否跨 Session 保留取决于产品的状态与 Context 策略。
