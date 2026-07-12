@@ -31,4 +31,4 @@ npm run start
 ## 相关章节
 - 第 7 章 Agent MVP：从零实现
 - 第 15 章 Agent 设计模式
-- 第 16 章 增强版 Agent
+- 第 16 章 Agent Host

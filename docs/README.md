@@ -1,6 +1,6 @@
 # 《现代 AI Agent 架构：从原理到生产实践》
 
-> 一本可持续维护、工程化、事实可验证、可发布、可扩展的 AI Agent 技术参考书
+> 从核心概念与理论出发，逐步实现一个可对话、可调用工具、可安装扩展并能完成简单编码任务的教学型 AI Agent
 
 [![Build Status](https://img.shields.io/github/actions/workflow/status/dollarser/modern-ai-agent-architecture/build-check.yml?style=flat-square)](https://github.com/dollarser/modern-ai-agent-architecture/actions)
 [![License](https://img.shields.io/badge/license-CC%20BY--SA%204.0-blue?style=flat-square)](LICENSE)
@@ -10,7 +10,19 @@
 
 ## 关于本书
 
-本书系统性地解析现代 AI Agent 的架构设计，从基础概念到生产实践，覆盖 Prompt、Instructions、Reasoning、Planning、Memory、Tools、Function Calling、MCP、Hooks、Skills、Runtime 等核心组件，并比较 GitHub Copilot、Claude Code、Cursor 等主流 Coding Agent 的公开能力与可验证的架构模式。
+本书面向希望理解并动手构建 AI Agent 的开发者：先解释 Prompt、Context、Reasoning、Planning、Memory、Tools、Function Calling、Runtime 等概念与理论，再实现可运行的 Agent 闭环，并逐步加入 Skill、MCP Server 与 Plugin 的安装、发现、启停和治理。最终教学目标是让读者能够构建一个支持多轮对话、受控工具调用和简单编码任务的 Agent Host，同时理解它与 Claude Code、Codex、GitHub Copilot 等产品公开能力之间的共性和边界。
+
+本书不以复刻任何商业 Coding Agent 为目标，也不把教学适配器描述为生产实现。涉及文件修改、Shell、第三方扩展和模型调用时，正文始终要求经过 Runtime、Policy、Approval 与 Sandbox，而不是把宿主权限直接交给模型。
+
+### 全书最终学习成果
+
+完成全书后，读者应能够：
+
+- 区分 AgentHost、Agent、Subagent、Tool、Skill、MCP、Connector 与 Plugin 等核心概念；
+- 实现 Task / Run 驱动的 Agent Loop，以及 Session、Memory、Checkpoint 和 Trace 的基本协作；
+- 注册本地 Tool，连接 MCP Server，并安装、启用、禁用和卸载 Skill 或 Plugin；
+- 为文件读取、补丁修改、构建和测试等编码操作设置路径、命令、审批和资源边界；
+- 组装一个能够对话、使用工具并完成简单编码任务的教学型 Agent，而不是只停留在单轮 Function Calling。
 
 ## 目标读者
 
@@ -26,11 +38,11 @@
 
 | 模块 | 章节 | 主题 |
 |------|------|------|
-| **第一部分：基础认知** | 1-4 | 历史演进、总体架构、Prompt/Instructions、Context 管理 |
+| **第一部分：基础认知** | 1-4 | 历史演进、五类正交概念、总体架构、Prompt/Instructions、Context 管理 |
 | **第二部分：构建首个 Agent** | 5-7 | Reasoning/Planning、Tools/Function Calling、Agent MVP |
 | **第三部分：可靠运行** | 8-11 | Memory、Runtime、Hooks、Tool Registry |
-| **第四部分：扩展与互操作** | 12-14 | Skills、MCP、Plugin 体系 |
-| **第五部分：规模化与生产** | 15-18 | 设计模式、增强实现、工程实践、最佳实践与评估 |
+| **第四部分：扩展与互操作** | 12-14 | Skills、MCP、Connector、Plugin 体系 |
+| **第五部分：规模化与生产** | 15-18 | 设计模式、Agent Host 组装、工程实践、最佳实践与评估 |
 | **第六部分：案例与索引** | 19-20 | 框架分析、常见架构问题、选型指南 |
 
 ## 快速开始
@@ -44,7 +56,7 @@
 ```bash
 # 创建本地虚拟环境并安装依赖
 uv venv .venv
-uv pip install mkdocs-material mkdocs-minify-plugin
+uv pip install -r requirements-docs.txt
 
 # 启动开发服务器
 .venv/bin/mkdocs serve
@@ -69,28 +81,19 @@ npm run start
 
 ## 项目结构
 
-```
-book/
-├── LICENSE                # 许可证
+```text
+.
+├── docs/                  # 书稿、20 章正文、附录与 MkDocs 首页
+├── examples/              # 15 个独立 Python/TypeScript 示例工程
+├── specs/                 # 现行书籍规范、共创方法与历史需求归档
+├── reviews/               # 审查报告、出版基线与维护记录
+├── scripts/               # 内部链接和 Mermaid 校验脚本
+├── .github/workflows/     # 构建、链接、图表与双语言 CI
 ├── mkdocs.yml             # MkDocs 配置
-├── docs/                  # 书稿源文件
-│   ├── README.md          # 项目说明
-│   ├── SUMMARY.md         # 目录
-│   ├── PREFACE.md         # 前言
-│   ├── CHANGELOG.md       # 变更日志
-│   ├── CONTRIBUTING.md    # 贡献指南
-│   ├── glossary/          # 术语表
-│   ├── faq/               # 常见问题
-│   ├── references/        # 参考文献
-│   ├── roadmap/           # 学习路线
-│   ├── chapters/          # 章节内容（20章）
-│   └── mermaid/           # 图索引
-├── examples/              # 可运行示例代码（Python + TypeScript）
-├── assets/                # 预留的静态资源目录
-├── diagrams/              # 预留的外部图表源文件目录；正文图使用 Mermaid
-├── scripts/               # 预留的维护脚本目录
-├── tests/                 # 预留的项目级测试目录；示例按各工程独立验证
-└── .github/workflows/     # CI/CD 流水线
+├── requirements-docs.txt  # 固定的文档构建依赖
+├── package.json           # 文档图表校验依赖与脚本
+├── CONTRIBUTING.md        # GitHub 贡献入口
+└── README.md              # GitHub 项目入口
 ```
 
 ## 验收指标
@@ -99,8 +102,10 @@ book/
 |------|------|------|
 | 正文字量 | 以结构完整、可导航、无明显重复和可维护为准 | ✅ |
 | 章节数 | 20 章 | ✅ |
-| Mermaid 图 | 47 张 | ✅ 已满足 |
-| 可运行代码示例 | 12 个独立工程、Python/TypeScript 共 24 个入口；包含最小 MVP、Runtime、跨组件预览与可插拔最终组装 Enhanced Agent | ✅ 已验证 |
+| Mermaid 图 | 54 张 | ✅ 已满足 |
+| 可运行代码示例 | 15 个独立工程、Python/TypeScript 共 30 个入口；包含 Skill/Plugin 安装、MCP Server 管理与可插拔 Agent Host | ✅ 已验证 |
+| 简单编码任务闭环 | 受限工作区内读取/搜索 → Patch → 测试 → 结果汇报；覆盖默认拒绝和路径越界 | ✅ 双语言纵向切片已验证；生产沙箱不在教学实现范围内 |
+| 多轮对话身份闭环 | Session 聚合 Message；每条用户消息创建独立 Task/Run；历史经裁剪进入新 Run | ✅ 双语言 Application 层契约已验证 |
 | Markdown 表格 | 160 个（当前清点；不以数量作为质量目标） | ✅ 已清点 |
 | 完整术语表 | 1 份 | ✅ |
 | 官方参考文献 | 每章至少一个可追溯来源；协议和产品事实使用直接官方来源 | ⚠️ 需定期校验链接 |
@@ -135,4 +140,4 @@ book/
 
 ---
 
-> **最终定位：** 一本可持续维护、工程化、事实可验证、可发布、可扩展的《现代 AI Agent 架构：从原理到生产实践》开源技术参考书。
+> **最终定位：** 一本兼顾概念、理论与开发实践，并以可扩展教学型 Agent Host 为落点的《现代 AI Agent 架构：从原理到生产实践》开源技术书。

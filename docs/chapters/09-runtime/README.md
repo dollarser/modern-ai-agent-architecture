@@ -12,7 +12,7 @@
 完成本章学习后，你将能够：
 
 1. 理解 Agent Runtime 的职责和核心组件
-2. 掌握 Agent 主循环的完整实现
+2. 掌握 Agent 主循环的教学实现
 3. 理解并发控制、超时管理和错误恢复
 4. 实现一个可配置的 Agent Runtime
 5. 理解 Runtime 的性能优化策略
@@ -39,6 +39,8 @@
 - 管理生命周期（启动、运行、暂停、终止）
 - 处理异常（超时、错误、重试）
 - 资源管理（Token 预算、并发控制、内存限制）
+
+这里要区分三个层次：Application / Agent Host 是应用级组合与治理边界，Runtime 是驱动一次或多次 Agent Run 的执行服务，Agent/Subagent 才是接收目标并作出决策的运行主体。因此 `AgentHost ≠ Agent`，`Runtime ≠ Agent`；Runtime 可以执行 Agent 请求的 Tool Call，却不应把业务决策硬编码进调度器。
 
 > **来源类型：** 推导分析 —— 基于 Claude Code、OpenAI Agents SDK 等框架的 Runtime 设计
 
@@ -69,6 +71,12 @@ graph TD
 
 后续代码演示的是轻量 Runtime：它说明控制流和状态边界，不等同于可直接用于跨进程恢复或高可用调度的生产实现。
 
+### 1.4 运行身份与恢复不变量
+
+Application 与 Runtime 的边界至少应分别保存或关联 `task_id`、`run_id`、`session_id`、`trace_id` 和当前 `checkpoint_revision`：Session/Task 通常由应用层拥有，Run/Checkpoint 由 Runtime 拥有，Trace 贯穿两层。对整个 Task 发起新的执行尝试时创建新的 `run_id`；同一 Run 内针对幂等 Tool 的有限瞬时重试仍属于原 Run；从 Checkpoint 恢复未完成执行也沿用原 `run_id` 并递增 revision。子代理创建 `child_run_id` 并记录 `parent_run_id`。任何写操作使用单独的 `idempotency_key`，不能用 Session 或 Run ID 粗暴替代，因为同一次 Run 可能合法地对同一 Tool 执行多次不同写入。
+
+恢复前必须比较任务版本、能力快照、Policy、Profile 和输入 Artifact 的兼容性。Replay 默认只读；若要重放副作用，必须显式进入重新执行流程并重新授权。
+
 ---
 
 ## 2. Runtime 实现
@@ -77,7 +85,7 @@ graph TD
 
 ```python
 """
-Agent Runtime - 完整实现
+Agent Runtime - 教学实现
 运行环境：Python 3.10+
 依赖：无
 """
@@ -393,8 +401,6 @@ npm --prefix examples/runtime/typescript test
 
 ## 3. 并发控制
 
-**图 9-2：执行沙箱与重试流程**
-
 ```mermaid
 flowchart TD
     A[Step 进入沙箱] --> B{超时检查}
@@ -417,6 +423,8 @@ flowchart TD
         F
     end
 ```
+
+> **图 9-2：** 执行沙箱与重试流程。只有可重试且满足幂等约束的失败才返回退避分支；Sandbox 负责资源隔离，不能被重试策略替代。
 
 ### 3.1 并行 Tool 调用
 

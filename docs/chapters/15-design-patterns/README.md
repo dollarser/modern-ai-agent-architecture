@@ -28,6 +28,8 @@
 
 ## 1. 模式概览
 
+本章代码用于展示模式的最小控制流，不再作为各基础设施组件的第二份权威实现：Tool Registry、Plugin Registry 与 Hook Pipeline 的完整契约分别以第 11、14、10 章及其 `examples/` 为准。本章重点是何时选择、如何组合以及代价，示例省略持久化、并发、身份和生产错误处理。
+
 ```mermaid
 graph TD
     subgraph "推理与决策"
@@ -67,7 +69,7 @@ ReAct（Reasoning + Acting）将推理和行动交替进行，每步行动后观
 
 ```python
 """
-ReAct 模式 - 完整实现
+ReAct 模式 - 教学实现
 """
 
 class ReActLoop:
@@ -339,7 +341,7 @@ class HandoffManager:
 
 ### 6.3 Subagent 委派契约
 
-Subagent 是由上层 Agent 委派、拥有独立执行上下文的 Agent 实例；“专家 Agent”通常只是带有特定 Instructions、Tool 权限和评估标准的 Subagent。它们不应共享主 Agent 的完整上下文、全部权限或无限预算。
+Subagent 是由上层 Agent 委派、拥有独立执行上下文的 Agent Run。它可以动态创建，也可以由 Host 从预注册定义实例化；不要求必须轻量、必须使用 Markdown 配置或必须运行在独立进程。它不应自动继承主 Agent 的完整上下文、全部权限或无限预算。
 
 | 契约项 | 委派时应明确的内容 |
 |--------|--------------------|
@@ -354,7 +356,43 @@ Subagent 是由上层 Agent 委派、拥有独立执行上下文的 Agent 实例
 
 > **来源类型：** 推导分析 —— 基于 Multi-Agent 与 Handoff 模式的工程取舍；不同框架的具体 API 以其官方文档为准
 
-### 6.4 本地 Handoff 与跨系统 A2A
+### 6.4 Expert Profile：专业化配置，不是运行关系
+
+“Expert”不是跨框架统一的运行时原语。本书将它规范为 `ExpertProfile`：一组用于配置 Agent 或 Subagent 的专业角色、能力和验收标准。
+
+```text
+ExpertProfile
+├── name / domain / description
+├── instructions
+├── preferred skills
+├── allowed / denied tools
+├── model and effort policy
+├── workspace / network scope
+├── budget and timeout
+└── output schema / evaluation rubric
+```
+
+同一个 `SecurityReviewExpert` 可以作为顶层 Agent 的 Profile，也可以在父 Agent 委派时实例化为 Subagent。两者关系是：
+
+```text
+ExpertProfile --配置--> Agent Run
+Parent Agent --委派--> Subagent Run
+```
+
+不要把 Expert 与 Subagent 当作同义词：前者描述“擅长什么和受什么约束”，后者描述“由谁委派以及本次运行如何隔离”。Plugin 可以分发 ExpertProfile 或 Subagent Definition，但 Host 在实例化时仍需重新计算权限、预算和能力快照。
+
+Profile 合并建议采用“默认值 → 组织策略 → 项目配置 → 本次委派”的顺序，但权限只能收窄、不能因后层配置而扩大；显式 deny 优先。Profile 版本和最终解析结果应进入 Trace/Checkpoint，使恢复运行不会悄然更换角色、模型或评估标准。
+
+| ExpertProfile 字段 | 解析责任 | 运行期结果 |
+|--------------------|----------|------------|
+| instructions / domain | Context Builder | 带来源与版本的角色指令 |
+| preferred skills | Skill Registry | 经过可见性过滤的候选 Skill，不是自动授权 |
+| allowed / denied tools | Policy + Tool Registry | 冻结的最小能力快照，deny 优先 |
+| model / effort | Model Router | 满足组织边界的 Provider 与预算 |
+| workspace / network | Sandbox / Connector | 规范化的资源与凭据作用域 |
+| output / rubric | Validator / Evaluator | 可机器验证的交付与验收记录 |
+
+### 6.5 本地 Handoff 与跨系统 A2A
 
 Handoff 解决的是同一 Host 或同一应用内部的控制权转移；当协作方属于不同团队、不同运行时或不同信任边界时，还需要约定发现、任务状态、结果交付与身份验证。A2A（Agent-to-Agent）等跨 Agent 协议尝试解决这一层互操作，但它们不替代 Tool 协议，也不替代本地的委派契约。
 
@@ -367,7 +405,18 @@ Handoff 解决的是同一 Host 或同一应用内部的控制权转移；当协
 
 在引入跨系统协作前，先把本地 Subagent 的输入、输出、预算和取消语义做完整；否则协议只会放大原有的权限与可观测性缺口。
 
-> **来源类型：** 推导分析 —— 参考 [A2A Protocol](https://a2a-protocol.org/latest/) 的跨 Agent 互操作定位；具体协议版本和实现能力应以官方规范为准
+还应区分三条互操作边：
+
+| 边界 | 代表协议/机制 | 主要交换对象 |
+|------|---------------|--------------|
+| Host ↔ Tool/Context Server | MCP | Tool、Resource、Prompt 与双向 Client 能力 |
+| Independent Agent System ↔ Agent System | A2A | Agent Card、Task、Message、Artifact 与任务状态 |
+| Editor/Client ↔ Coding Agent Process | Agent Client Protocol（ACP） | Session、Prompt、Tool/终端更新与编辑器交互 |
+| Parent Agent ↔ Subagent（同一 Host） | 本地 Handoff/Runner Port | 委派输入、预算、能力快照与结构化结果 |
+
+协议缩写并非全球唯一；这里的 ACP 特指 `agentclientprotocol/agent-client-protocol` 所定义的编辑器—Coding Agent 协议。MCP、A2A 和 ACP 解决不同连接边，均不自动提供应用内部 Policy、Sandbox 或业务授权。
+
+> **来源类型：** Fact + 推导分析 —— 参考 [A2A Protocol](https://a2aproject.github.io/A2A/latest/specification/) 与 [Agent Client Protocol](https://github.com/agentclientprotocol/agent-client-protocol) 的公开定位；具体协议版本和实现能力应以官方规范为准
 
 ---
 
@@ -515,7 +564,7 @@ class ToolRegistry:
 
 ### 9.1 原理
 
-Plugin Registry 是 Tool Registry 的进一步抽象：插件不仅包含工具函数，还可能包含完整的生命周期管理（初始化、激活、停用、关闭）、配置管理、以及与其他组件的集成逻辑。插件通过统一的接口注册到系统中，系统可以在运行时动态加载、激活和停用插件，实现真正的"热插拔"扩展。
+Plugin Registry 与 Tool Registry 是并列控制面，不是后者的子类或“更高一级 Tool Registry”。前者管理分发包的安装/加载/启停及其贡献项，后者管理本次运行可调用的 Tool Schema、来源、路由和状态。Plugin 激活后可向 Tool Registry 提交 Tool，也可以只贡献 Skill、Hook 或配置；停用时则按 Owner 原子撤回贡献项。
 
 ### 9.2 最小实现
 
@@ -651,6 +700,8 @@ class EventBus:
         return self._event_history
 ```
 
+该 Event Bus 是 Observer 通知示例：Subscriber 失败被隔离，不能用来承载权限拒绝、审批或其他必须 fail-closed 的控制。安全 Guard 应走同步、可返回明确决策的 Hook/Policy 路径；若使用持久化消息系统驱动业务状态，还需要事件 ID、Schema 版本、幂等消费者、确认与重放语义。
+
 **优点：** 松耦合、可扩展、可观测
 **缺点：** 调试困难、执行顺序不直观
 **适用场景：** 大型 Agent 系统、多组件协调
@@ -670,27 +721,38 @@ class HookPipeline:
     """Hook Pipeline 模式"""
 
     def __init__(self):
-        self._hooks: dict[str, list[tuple[int, callable]]] = {}
+        self._hooks: dict[str, list[tuple[int, str, callable]]] = {}
 
-    def register(self, event: str, handler, priority: int = 100):
-        """注册 Hook（优先级越小越先执行）"""
-        self._hooks.setdefault(event, []).append((priority, handler))
+    def register(self, event: str, handler,
+                 priority: int = 100, kind: str = "observer"):
+        """kind 只能是 guard 或 observer；安全检查必须注册为 guard。"""
+        if kind not in {"guard", "observer"}:
+            raise ValueError(f"未知 Hook 类型: {kind}")
+        self._hooks.setdefault(event, []).append((priority, kind, handler))
         self._hooks[event].sort(key=lambda x: x[0])
 
     def execute(self, event: str, context: dict, *args) -> dict:
         """执行 Hook Pipeline（支持额外参数传递）"""
-        for _, handler in self._hooks.get(event, []):
+        for _, kind, handler in self._hooks.get(event, []):
             try:
                 result = handler(context, *args)
                 if result is False:  # 返回 False 表示中断
                     context["_interrupted"] = True
+                    context["_denied_by"] = getattr(handler, "__name__", "anonymous")
                     break
                 if isinstance(result, dict):
                     context.update(result)
             except Exception as e:
-                context["_errors"] = context.get("_errors", []) + [str(e)]
+                if kind == "guard":
+                    # fail-closed：调用方不得在异常后继续执行受保护动作。
+                    raise PermissionError(f"Guard Hook 拒绝执行: {e}") from e
+                context["_observer_errors"] = (
+                    context.get("_observer_errors", []) + [str(e)]
+                )
         return context
 ```
+
+调用方在执行 Tool Handler 前还必须检查 `_interrupted`；更推荐让 Guard 返回结构化 `allow / ask / deny`，避免把 `False` 的含义分散在不同 Hook 中。Observer 只用于日志、指标和审计副本，不能承担授权边界。
 
 **优点：** 关注点分离、可组合、可配置
 **缺点：** 顺序依赖、性能开销
@@ -699,8 +761,6 @@ class HookPipeline:
 ---
 
 ## 12. 模式组合指南
-
-**图 15-2：模式选择决策树**
 
 ```mermaid
 flowchart TD
@@ -716,6 +776,8 @@ flowchart TD
     J -->|否| K[Multi-Agent + Handoff]
     J -->|是| L["Multi-Agent + Event Bus<br/>+ State Persistence"]
 ```
+
+> **图 15-2：** 模式选择决策树。从简单确定性调用开始，只有动态工具选择、规划、多角色和持久化需求真实存在时才逐层增加复杂度。
 
 | 场景 | 候选模式组合 | 必须验证的代价 |
 |------|--------------|----------------|
@@ -769,4 +831,5 @@ flowchart TD
 - [ ] 能实现每种模式的最小可运行版本
 - [ ] 理解每种模式的适用场景
 - [ ] 能根据需求组合多种模式
+- [ ] 能区分 Expert Profile 与 Subagent Run
 - [ ] 运行了各模式的示例代码

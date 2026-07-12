@@ -16,6 +16,7 @@
 3. 理解 Agent 生命周期的 7 个关键阶段
 4. 理解各组件之间的交互时序
 5. 建立从整体架构到具体组件的认知框架
+6. 使用“运行主体、能力、协议、产品集成、分发单元”分类相邻概念
 
 ---
 
@@ -59,31 +60,39 @@
 现代 AI Agent 的架构由以下核心组件构成：
 
 ```mermaid
-graph TD
-    User[User<br/>用户] -->|输入| Prompt[Prompt<br/>任务目标]
-    Prompt --> Agent[Agent Core<br/>Agent 核心]
-    Instructions[Instructions<br/>全局规则] -->|约束| Agent
-    Agent --> Reasoning[Reasoning<br/>推理引擎]
-    Agent --> Planning[Planning<br/>规划器]
-    Agent --> Memory[Memory<br/>记忆管理]
-    Agent --> TC[Tool Calling<br/>工具调用]
-    TC --> BT[Built-in Tools<br/>内置工具]
-    TC --> MCP[MCP Tools<br/>协议工具]
-    MCP --> MCP-S[MCP Server<br/>工具服务]
-    TC -->|返回| OB[Observation<br/>观察结果]
-    OB -->|反馈| Reasoning
-    Agent --> Hooks[Hooks<br/>生命周期钩子]
-    Agent --> Skills[Skills<br/>工作流模板]
+flowchart TB
+    User["User / Upstream Application"] --> Runtime
+    subgraph Host["Application / Agent Host"]
+        Runtime["Runtime<br/>Loop · Budget · Checkpoint"]
+        Policy["Policy / Approval / Sandbox"]
+        Registry["Registry / Router"]
+        Subject["Agent / Subagent"]
+        Context["Context Builder"]
+        Memory["Memory"]
+        Hooks["Guard / Observer Hooks"]
+        Subject -->|请求执行| Runtime
+        Runtime --> Policy
+        Runtime --> Registry
+        Runtime --> Hooks
+        Context --> Subject
+        Memory --> Context
+    end
+    Model["Model Provider"] --> Subject
+    Registry --> Tools["Tool Handlers"]
+    Tools -->|Observation| Runtime
+    Extensions["Skill · MCP · Connector · Plugin"] -->|经受控边界接入| Registry
 ```
 
-> **图 2-1：** Agent 整体架构。核心组件包括 Reasoning、Planning、Memory、Tool Calling，以及支撑性的 Hooks 和 Skills。
+> **图 2-1：** Agent 应用运行架构。Host 是组合与治理边界，Agent/Subagent 是运行主体；Runtime 驱动循环并通过 Policy、Registry 和 Sandbox 执行 Tool，扩展只能经受控边界接入。
 
 ### 2.2 组件职责总览
 
 | 组件 | 职责 | 类比 |
 |------|------|------|
+| Agent Host | 提供 Runtime、Policy、Registry、Checkpoint 与扩展生命周期 | 受治理的工作环境 |
+| Agent / Subagent | 接收目标并执行决策循环的运行主体 | 员工 / 被委派的协作者 |
 | Prompt | 承载当前任务目标 | 用户说的话 |
-| Instructions | 全局行为规则，始终在上下文 | 员工手册 |
+| Instructions | Host 按作用域、优先级和当前策略组装的较稳定行为约束 | 员工手册 |
 | Reasoning | 基于上下文进行逻辑推理 | 大脑思考 |
 | Planning | 将复杂任务分解为可执行步骤 | 制定计划 |
 | Memory | 存储和检索历史信息 | 记忆 |
@@ -91,6 +100,8 @@ graph TD
 | Skills | 可复用工作流模板 | 操作手册 |
 | Hooks | 生命周期事件回调 | 监控告警 |
 | MCP | 连接外部 Tool、Resource、Prompt 等能力的互操作协议 | 外部能力接口标准 |
+| Connector | 接入具体产品的身份、授权、端点与数据映射 | 某个服务的接入适配器 |
+| Plugin | 安装、版本化、启停和分发一组 Host 扩展 | 可治理的扩展包 |
 
 > **来源类型：** 推导分析 —— 基于 Claude Code、OpenAI Agents SDK 等框架的组件设计
 
@@ -100,10 +111,13 @@ graph TD
 
 - **Prompt + Instructions → Agent 的输入约束**
 - **Reasoning + Planning → Agent 的决策层**
-- **Tool Calling + MCP → Agent 的执行层**
+- **Tool + Skill → Agent 可请求使用的能力层**
+- **MCP → Host 与独立 Server 互操作的协议层**
+- **Connector → Host 接入具体产品的集成层**
+- **Plugin → Host 安装和治理扩展的分发层**
 - **Memory → Agent 的状态层**
 - **Hooks → Agent 的横切关注点**
-- **Skills → Agent 的知识层**
+- **Agent Host → 运行并治理 Agent/Subagent，而不是替代 Agent 做业务决策**
 
 ### 2.4 Scaffolding、Harness、Runtime 与 Orchestration
 
@@ -148,6 +162,159 @@ graph TD
 推荐为每个关键任务定义“可接受能力”而非绑定单一供应商：例如要求 JSON Schema 校验通过、首字延迟不超过目标、失败可切换到兼容模型。模型路由是优化手段，不应绕过 Guardrails、权限检查或统一评估。
 
 > **来源类型：** 推导分析 —— 基于第 4、6、12、18、19 章的上下文、Tool、运行时、成本和评估要求
+
+### 2.6 五类正交概念：主体、能力、协议、集成与分发
+
+Agent 生态中的名词不能排成一棵“从大到小”的包含树。它们回答的是五个不同问题，因此应作为正交概念理解：
+
+| 分类 | 回答的问题 | 本书中的概念 | 主要展开章节 |
+|------|------------|--------------|--------------|
+| 运行主体（Runtime Subject） | 谁在接收目标并运行决策循环？ | Agent、Subagent | 第 1、2、15～16 章 |
+| 能力（Capability） | 主体知道怎么做或可以调用什么？ | Skill、Tool | 第 6、11～12 章 |
+| 协议（Protocol） | Host 如何与独立系统交换能力和上下文？ | MCP；跨系统协作场景中的 A2A | 第 13、15 章 |
+| 产品集成（Product Integration） | 如何接入某个具体服务及其身份、授权和数据映射？ | Connector | 第 13 章 |
+| 分发单元（Distribution Unit） | 如何安装、版本化、启停和分发一组扩展？ | Plugin | 第 14 章 |
+
+```mermaid
+flowchart TB
+    Host["Application / Agent Host<br/>Runtime · Policy · Registry · Checkpoint"]
+    Host --> Subjects["运行主体<br/>Agent · Subagent"]
+    Host --> Capabilities["能力<br/>Tool · Skill"]
+    Host --> Protocols["协议<br/>MCP · A2A"]
+    Host --> Integrations["产品集成<br/>Connector"]
+    Host --> Distribution["分发单元<br/>Plugin"]
+    Expert["Expert Profile<br/>角色 / 权限 / 评估配置"] -.配置.-> Subjects
+    Skills["Skill<br/>工作流知识"] -.指导.-> Subjects
+    Subjects -->|请求调用| Tools["Tool<br/>可执行能力"]
+    Protocols -->|承载互操作| Tools
+    Integrations -->|适配具体服务| Tools
+    Distribution -->|贡献并治理| Capabilities
+    Distribution -.可选贡献.-> Expert
+    Distribution -.可选提供.-> Protocols
+```
+
+> **图 2-6：** 五类正交概念及其关系。`AgentHost` 是宿主，不是运行主体；Expert Profile 是配置，不是另一种执行层；MCP 是协议，Connector 是具体产品集成，Plugin 是分发和生命周期边界。
+
+关键边界如下：
+
+- `AgentHost ≠ Agent`：Host 提供 Runtime、Policy、Registry、Sandbox 和状态服务，Agent 是其中运行的决策主体。
+- `Expert Profile ≠ Subagent`：Expert Profile 可配置顶层 Agent 或 Subagent；Subagent 描述父子委派关系。
+- `Skill ≠ Tool`：Skill 提供按需加载的工作流知识，Tool 提供受 Runtime 治理的可执行能力；Skill 不直接绕过 Runtime 执行脚本。
+- `Connector ≠ MCP`：Connector 可以使用 MCP、REST、SDK 或数据同步实现；MCP 不绑定某个具体 SaaS 产品。
+- `Plugin ≠ Tool`（也不等于任一 Capability）：Plugin 可以打包 Tool、Skill、Hook、Connector 预设或 Subagent 定义，但安装 Plugin 不代表这些能力已获运行授权。
+
+这套分类是后续章节的导航框架，不要求所有产品都使用相同名称。遇到新概念时，先判断它在回答“谁运行、能做什么、如何通信、接入哪个产品、如何分发”中的哪一个问题。
+
+#### 2.6.1 本书统一概念树
+
+下面的树是阅读导航，不是面向对象继承树，也不表示父节点自动拥有子节点权限：
+
+```text
+Application / Agent Host
+├── 运行主体（Runtime Subject）
+│   ├── Agent
+│   └── Subagent
+├── 角色配置（Role Configuration）
+│   └── ExpertProfile
+├── 能力（Capability）
+│   ├── Tool
+│   └── Skill
+├── 协议（Protocol）
+│   └── MCP
+├── 产品集成（Product Integration）
+│   └── Connector
+└── 分发单元（Distribution Unit）
+    └── Plugin
+```
+
+这里的 `Application / Agent Host` 是组合与治理边界；五类概念和角色配置都由它托管、解析或连接。`ExpertProfile` 单独列出，是因为“用什么角色配置一次运行”既不是运行主体，也不是可执行能力。
+
+#### 2.6.2 同一个扩展从安装到执行经过什么
+
+```mermaid
+flowchart LR
+    Package["Plugin / Skill 包"] -->|安装与校验| Catalog["Catalog"]
+    Catalog -->|启用与发现| Host["Agent Host"]
+    Host -->|构造运行| Subject["Agent / Subagent"]
+    Profile["ExpertProfile"] -->|配置| Subject
+    Skill["Skill 指令"] -->|加载到 Context| Subject
+    Subject -->|提出 Tool Call| Runtime["Runtime + Policy"]
+    Runtime -->|授权后路由| Tool["Tool Handler"]
+    Tool -->|可选| Connector["Connector Adapter"]
+    Tool -->|可选经 Client| MCP["MCP Server"]
+```
+
+> **图 2-7：** 从分发、发现到运行和执行的完整边界。Skill 中即使附带脚本，也只能要求 Agent 经 Runtime 暴露的文件、命令或专用 Tool 执行；Skill Loader 不直接运行脚本。
+
+| 阶段 | 主要对象 | 必须回答的治理问题 |
+|------|----------|--------------------|
+| 安装 | Plugin、Skill、Connector 配置 | 来源是否可信、版本是否兼容、完整性是否通过 |
+| 启用 | Plugin、Connector、MCP Server | 当前作用域是否允许，依赖与认证是否就绪 |
+| 发现 | Skill 元数据、Tool Schema、ExpertProfile | 本次运行应看到哪些候选项，名称如何消歧 |
+| 装载 | Skill 正文、Profile、Tool 快照 | 内容是否可信，权限是否按父子关系收窄 |
+| 调用 | Agent/Subagent → Runtime → Tool | 参数、策略、审批、沙箱、超时是否通过 |
+| 观测 | Observation、Trace、Checkpoint | 结果是否脱敏、可追踪、可恢复与可撤销 |
+
+因此，`安装成功 ≠ 已启用 ≠ 对本次运行可见 ≠ 获准调用`。这一分层贯穿第 9、11～16 章。
+
+### 2.7 Task、Run、Session、Checkpoint 与 Trace
+
+“用户在聊什么”“系统正在执行什么”和“从哪里恢复”必须使用不同标识：
+
+```mermaid
+flowchart TB
+    Session["Session<br/>交互与共享状态作用域"] --> Conversation["Conversation<br/>用户可见消息序列"]
+    Session --> Task["Task<br/>期望完成的目标"]
+    Task --> Run1["Agent Run #1<br/>一次执行尝试"]
+    Task --> Run2["Agent Run #2<br/>重试或新尝试"]
+    Run1 --> SubRun["Subagent Run<br/>被委派的子执行"]
+    Run1 --> CP1["Checkpoint<br/>可恢复快照"]
+    Run1 --> Trace["Trace<br/>事件与因果链"]
+    SubRun --> Trace
+```
+
+> **图 2-8：** 交互、目标、执行、恢复和观测对象的身份关系。一个 Session 可承载多个 Task/Run；一次 Run 可产生多个 Checkpoint 和子 Run，并共同进入 Trace。
+
+| 对象 | 身份与生命周期 | 不应混同 |
+|------|----------------|----------|
+| Task | 用户或上游提交的目标；可以被取消、重试或拆分 | Prompt 文本、某次执行尝试 |
+| Agent Run | Agent 对 Task 的一次有开始、终态和预算的执行尝试 | Session、Agent 定义 |
+| Subagent Run | 带 `parent_run_id` 和委派契约的子执行 | ExpertProfile、普通函数调用 |
+| Session | 多轮交互、身份和可共享状态的作用域 | 单次 Run、永久 Memory |
+| Conversation | Session 中面向参与者的消息序列 | 完整 Runtime 状态或 Trace |
+| Checkpoint | 某个 Run 在某个 revision 的可恢复快照 | Memory、备份、审计日志 |
+| Trace | Run/子 Run/Tool 调用的因果与观测事件链 | 可直接恢复的状态快照 |
+
+`resume` 从兼容 Checkpoint 继续未完成 Run；`replay` 读取或重演既有事件，默认不得再次产生外部副作用。`task_id` 用于业务目标，`run_id` 标识一次尝试，`idempotency_key` 用于下游副作用去重，三者不能复用为同一个概念。
+
+> **来源类型：** Fact + 工程推导 —— A2A 官方规范用 `contextId` 组合多个 Task，并为 Task 分配独立 ID；本书据此区分 Session/Context 与 Task，再为 Host 内部可恢复尝试定义 `run_id`。Trace/Span 的父子因果语义可与 OpenTelemetry 对齐，但 OpenTelemetry 是通用可观测性标准，不是 Agent 框架，也不定义 Task、Run 或 Session。
+
+### 2.8 Workflow、Agent 与 Orchestrator
+
+| 类型 | 谁决定下一步 | 适合场景 | 主要风险 |
+|------|--------------|----------|----------|
+| Workflow | 代码、DAG 或状态机 | 稳定流程、合规步骤、可重复批处理 | 分支爆炸、适应性不足 |
+| Agent | 模型基于 Context 和 Observation 动态决策 | 开放式分析、工具选择、未知步骤 | 不确定性、成本与权限扩大 |
+| Agentic Workflow | Workflow 固定外层边界，Agent 只在指定节点决策 | 既要治理又要局部适应的生产任务 | 两套状态与错误语义需对齐 |
+| Orchestrator | 调度 Workflow、Agent Run 或外部 Job | 并发、依赖、委派、汇总与补偿 | 中央复杂度和状态一致性 |
+
+`Workflow ≠ Agent`，Planner 生成的一次 Plan 也不等于稳定的 Workflow 定义。能由确定性步骤可靠完成的流程，应先使用 Workflow；只有步骤无法预先穷举、确实需要基于观察动态选择时才引入 Agent。Orchestrator 可以调度 Agent，但自身不必是 Agent。
+
+### 2.9 七类工程实践导航
+
+五类正交概念描述“系统里有什么”，工程实践描述“设计者在优化什么”。两套分类不能互相替代：
+
+| 工程实践 | 核心设计对象 | 主要章节 | 不应误解为 |
+|----------|--------------|----------|------------|
+| Prompt Engineering | 单次任务、示例与输出契约 | 第 3 章 | 只靠措辞解决权限和事实问题 |
+| Context Engineering | 模型可见的 Instructions、Skill、Memory、证据、Schema 与预算 | 第 3、4、8、12 章 | 把所有信息塞进长窗口 |
+| Tool Engineering | Tool Schema、Handler、Observation、副作用和幂等 | 第 6、11、13 章 | Function Calling 自动执行函数 |
+| Workflow Engineering | DAG、状态机、确定性业务步骤与补偿 | 第 5、15 章 | 每个 Workflow 都必须由 Agent 决策 |
+| Harness Engineering | 单次 Run 的 Runtime、工作区、Tool、Policy、Sandbox、反馈和恢复 | 第 9～11、16～17 章 | Agent Host 产品组件的同义词 |
+| Loop Engineering | 跨 Run 的 Trigger、Dispatch、Verifier、State、Budget、Stop 与 Human Gate | 第 9、16～18 章 | Agent 内部 `while` 循环或无限自治 |
+| Agentic Engineering | 上述实践与评估、安全、部署、运维的系统组合 | 全书，重点第 16～18 章 | 一项位于演进链末端的新组件 |
+
+这些实践通常同时存在。例如，一个 Coding Agent 的单次 Run 需要 Prompt、Context、Tool 与 Harness；定时扫描 Issue、为每项工作创建隔离 Run、独立验证并在人工门禁处停止，则进一步需要 Loop Engineering。
 
 ---
 
@@ -281,7 +448,7 @@ Agent 启动时加载必要的资源：
 Agent 读取当前上下文：
 
 - 用户 Prompt
-- Instructions（始终在上下文）
+- Instructions（由 Host 按当前作用域与策略组装）
 - 历史对话（如果有）
 - 加载的 Skill 内容（如果有匹配的 Skill）
 
@@ -398,11 +565,11 @@ sequenceDiagram
 
 ### 6.1 Agent 主循环实现
 
-以下代码展示了 Agent 主循环的完整实现：
+以下代码展示了 Agent 主循环的教学实现：
 
 ```python
 """
-Agent 主循环完整实现
+Agent 主循环教学实现
 运行环境：Python 3.10+
 依赖：无
 预期输出：Agent 完整执行一次推理-规划-执行-观察循环
@@ -733,7 +900,8 @@ Agent 主循环（Reasoning → Planning → Tool Calling → Observation）是 
 ## 本章 Checklist
 
 - [ ] 能画出 Agent 整体架构图
-- [ ] 理解 7 个组件的职责和关系
+- [ ] 理解核心组件的职责和关系
+- [ ] 能用五类正交概念区分 Agent、Subagent、Tool、Skill、MCP、Connector 与 Plugin
 - [ ] 能描述 Agent 主循环的 8 个阶段
 - [ ] 理解生命周期的 7 个状态及转换条件
 - [ ] 能画出组件交互时序图

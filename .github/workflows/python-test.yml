@@ -10,6 +10,9 @@ on:
       - 'examples/**/*.py'
       - 'examples/**/requirements.txt'
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -28,19 +31,22 @@ jobs:
       - name: Find and test all Python examples
         run: |
           for example_dir in examples/*/python/; do
+            echo "=== Testing $example_dir ==="
             if [ -f "$example_dir/requirements.txt" ]; then
-              echo "=== Testing $example_dir ==="
               pip install -r "$example_dir/requirements.txt"
             fi
-            if [ -f "$example_dir/main.py" ]; then
-              python "$example_dir/main.py"
-            fi
-            # Run all .py files that are test files
+            python -m compileall -q "$example_dir"
+            found_test=false
             for test_file in "$example_dir"test_*.py; do
               if [ -f "$test_file" ]; then
+                found_test=true
                 python "$test_file"
               fi
             done
+            # CLI 型 Installer/Manager 由测试覆盖，不能假定 main.py 支持无参数启动。
+            if [ "$found_test" = false ] && [ -f "$example_dir/main.py" ]; then
+              python "$example_dir/main.py"
+            fi
           done
 
       - name: Verify all examples have README

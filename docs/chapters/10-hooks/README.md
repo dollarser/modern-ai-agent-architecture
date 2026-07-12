@@ -146,6 +146,12 @@ class HookPriority(Enum):
     LOW = 2     # 最后执行
 
 
+class HookMode(Enum):
+    """失败语义；不能从 before/after 事件名推断。"""
+    GUARD = "guard"
+    OBSERVER = "observer"
+
+
 @dataclass
 class HookContext:
     """Hook 执行上下文"""
@@ -162,6 +168,7 @@ class HookDefinition:
     event: str
     callback: Callable
     priority: HookPriority = HookPriority.NORMAL
+    mode: HookMode = HookMode.OBSERVER
     enabled: bool = True
 
 
@@ -187,7 +194,8 @@ class HookSystem:
 
     def register(self, event: str, callback: Callable,
                  name: str = "",
-                 priority: HookPriority = HookPriority.NORMAL):
+                 priority: HookPriority = HookPriority.NORMAL,
+                 mode: HookMode = HookMode.OBSERVER):
         """注册 Hook"""
         if event not in self._hooks:
             raise ValueError(f"未知事件: {event}")
@@ -197,6 +205,7 @@ class HookSystem:
             event=event,
             callback=callback,
             priority=priority,
+            mode=mode,
         )
         self._hooks[event].append(hook)
         # 按优先级排序
@@ -219,10 +228,10 @@ class HookSystem:
             try:
                 hook.callback(context)
             except Exception as e:
-                if event.startswith("before_"):
-                    # Before Hook 异常可阻止操作执行
+                if hook.mode is HookMode.GUARD:
+                    # 安全/权限 Guard 必须 fail-closed
                     raise
-                # 其他 Hook 失败不影响主流程
+                # Observer 失败隔离并告警
                 print(f"  [Hook Error] {hook.name}: {e}")
 
         return context
@@ -332,7 +341,8 @@ def main():
     agent.hooks.register(
         "before_tool_call", permission_check,
         name="permission_check",
-        priority=HookPriority.HIGH
+        priority=HookPriority.HIGH,
+        mode=HookMode.GUARD
     )
 
     # 注册自定义 Hook：数据脱敏

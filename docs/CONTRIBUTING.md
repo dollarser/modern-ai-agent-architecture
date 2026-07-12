@@ -14,7 +14,7 @@
 - 文档链接失效
 - 术语不一致
 
-请提交 [Issue](https://github.com/ai-agent-architecture/book/issues)，并附上：
+请提交 [Issue](https://github.com/dollarser/modern-ai-agent-architecture/issues)，并附上：
 
 - 问题所在章节/文件
 - 具体问题描述
@@ -46,42 +46,9 @@
 4. **引用规范**：官方文档 > 源码 > RFC > 论文 > 官方博客 > 社区共识
 5. **术语统一**：使用 [术语表](glossary/Glossary.md) 中的标准译法
 
-### 章节模板
+### 章节结构
 
-每章必须包含以下 14 个要素：
-
-```markdown
-# 第 X 章：章节标题
-
-> **难度等级：** ⭐ ~ ⭐⭐⭐⭐⭐
-> **来源可信度：** 官方规范 / 源码 / 论文 / 推导 / 观点
-
-## 学习目标
-
-## 前置知识
-
-## 1. 背景
-
-## 2. 核心概念
-
-## 3. 生命周期位置
-
-## 4. 架构图
-
-## 5. 最小可运行示例
-
-## 6. 最佳实践
-
-## 7. 反模式
-
-## 8. FAQ
-
-## 9. 官方参考
-
-## 10. 延伸阅读
-
-## 本章 Checklist
-```
+章节必须有学习目标、适用读者或前置知识、核心正文、来源和 Checklist。架构图、代码、FAQ、反模式等只在能提升理解时加入，不机械填充固定栏目。完整要求以 [BookSpec 章节规范](https://github.com/dollarser/modern-ai-agent-architecture/blob/main/specs/book/02-chapter-specification.md) 为准。
 
 ## 审阅流程
 

@@ -51,7 +51,7 @@ graph TD
     subgraph "Tool 来源"
         BT[Built-in Tools]
         MCP[MCP Tools]
-        Plugin[Plugin Tools]
+        Plugin[Plugin-contributed Tools]
     end
 
     BT --> Registry[Tool Registry]
@@ -78,6 +78,22 @@ graph TD
 | Tool 多、成本或风险差异显著 | 单独引入 Router / Scheduler，加入策略、预算、限流和审批 | 路由误选、并发竞态和策略漂移变成新风险；记录候选集、选择理由和执行结果以便审计 |
 | 跨租户、远程 MCP 或第三方扩展 | 把身份、授权、凭据范围和健康检查纳入控制面 | 元数据与连接状态需要同步；不能把第三方描述或 Tool 名称当成可信安全边界 |
 
+### 1.4 Catalog、Loader、Manager、Registry、Resolver 与 Router
+
+这些名称描述的是不同生命周期阶段，不应互换：
+
+| 组件 | 权威数据/动作 | 典型输出 |
+|------|---------------|----------|
+| Catalog | 已安装包的版本、来源、校验和与启用状态 | 安装记录 |
+| Loader | 解析静态 Manifest、Skill 或 Plugin 定义 | 内存对象；不负责执行脚本 |
+| Manager | 管理连接、子进程、刷新、启停和健康状态 | 活跃连接或服务实例 |
+| Resolver | 解析名称、版本、依赖、别名与冲突 | 唯一 canonical identity |
+| Registry | 当前 Host 已注册对象及其来源、Schema 和状态 | 可查询的候选集合 |
+| Router | 从本次运行可见且获准的候选集中选择并分派 | 目标 Handler/Adapter |
+| Scheduler | 决定何时、以何种并发和预算执行 | 执行时序 |
+
+典型链路是 `Installer → Catalog → Loader/Manager → Resolver → Registry → Policy Filter → Router → Scheduler/Handler`。简单系统可以合并实现类，但接口和状态语义仍应区分；尤其不能让 Catalog 中“已安装”的对象直接绕过 Registry 与 Policy 进入 Router。
+
 **How：** 本章示例实现 Registry 与一个基础 Router，重点是可查找、可禁用和可度量的 Tool 元数据。生产环境还应把授权判断放在每次执行路径上，并以第 17 章的 Guardrails、审批和审计机制兜底。
 
 ---
@@ -88,7 +104,7 @@ graph TD
 
 ```python
 """
-Tool Registry - 完整实现
+Tool Registry - 教学实现
 运行环境：Python 3.10+
 依赖：无
 """
@@ -332,7 +348,7 @@ def main():
         tags=["database", "query"]
     ))
 
-    # 注册 Plugin Tool
+    # 注册由 Plugin 贡献的 Tool
     registry.register(RegisteredTool(
         name="git_commit",
         description="创建 Git 提交",
@@ -372,9 +388,9 @@ def main():
     for d in registry.get_definitions():
         print(f"    • {d['function']['name']}")
 
-    # 注销 Plugin Tool
+    # 注销由 Plugin 贡献的 Tool
     count = registry.unregister_by_source(ToolSource.PLUGIN)
-    print(f"\n  注销 {count} 个 Plugin Tool")
+    print(f"\n  注销 {count} 个 Plugin-contributed Tool")
     print(f"  剩余: {registry.list_all()}")
 
     print("=" * 60)
@@ -388,14 +404,12 @@ if __name__ == "__main__":
 
 ## 3. Tool Router
 
-**图 11-2：Tool 路由与发现流程**
-
 ```mermaid
 flowchart TD
     A[任务 / 查询] --> B[Tool Router]
     B --> C[查询 Registry<br/>获取活跃 Tool]
     C --> D[按标签过滤]
-    D --> E[计算匹配分数<br/>名称 +3 / 描述 +2 / 标签 +1]
+    D --> E[计算匹配分数<br/>名称 0.5 / 词项 0.1 / 标签 0.2]
     E --> F[按分数排序]
     F --> G[返回候选 Tool 列表]
     G --> H[Agent 选择 Tool]
@@ -404,6 +418,8 @@ flowchart TD
     I -->|不可用| K["❌ 拒绝"]
     J --> L[返回结果]
 ```
+
+> **图 11-2：** Tool 路由与发现流程。Registry 提供活跃候选，Router 负责排序；最终执行仍需状态、速率和 Policy 检查。
 
 ### 3.1 Router 实现
 

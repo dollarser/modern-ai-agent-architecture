@@ -83,7 +83,7 @@ graph TD
 
 ```python
 """
-Memory 系统 - 完整实现
+Memory 系统 - 教学实现
 运行环境：Python 3.10+
 依赖：无
 """
@@ -104,6 +104,14 @@ class MemoryEntry:
     last_accessed: float = field(default_factory=time.time)
     importance: int = 1  # 1-10，重要程度
     metadata: dict = field(default_factory=dict)
+    tenant_id: str = "default"
+    subject_id: str = "anonymous"
+    namespace: str = "conversation"
+    provenance: str = "user_input"
+    trust: str = "untrusted"  # untrusted / verified / user_confirmed
+    retention_until: float | None = None
+    consent: bool = False
+    version: int = 1
 
 
 class MemorySystem:
@@ -167,30 +175,54 @@ class MemorySystem:
 
     def save_to_long_term(self, key: str, content: str,
                           importance: int = 5,
-                          metadata: Optional[dict] = None):
+                          metadata: Optional[dict] = None,
+                          *, tenant_id: str = "default",
+                          subject_id: str = "anonymous",
+                          namespace: str = "preference",
+                          provenance: str = "user_input",
+                          trust: str = "untrusted",
+                          retention_until: float | None = None,
+                          consent: bool = False):
         """保存到长期记忆"""
+        if namespace == "preference" and not consent:
+            raise PermissionError("用户偏好写入长期记忆前必须获得明确同意")
+        storage_key = f"{tenant_id}:{subject_id}:{namespace}:{key}"
         entry = MemoryEntry(
             id=self._next_id(),
             content=content,
             importance=importance,
-            metadata=metadata or {}
+            metadata=metadata or {}, tenant_id=tenant_id,
+            subject_id=subject_id, namespace=namespace,
+            provenance=provenance, trust=trust,
+            retention_until=retention_until, consent=consent,
         )
-        self.long_term[key] = entry
+        self.long_term[storage_key] = entry
         return entry
 
-    def recall_from_long_term(self, key: str) -> Optional[MemoryEntry]:
+    def recall_from_long_term(self, key: str, *, tenant_id: str = "default",
+                              subject_id: str = "anonymous",
+                              namespace: str = "preference") -> Optional[MemoryEntry]:
         """从长期记忆检索"""
-        entry = self.long_term.get(key)
+        storage_key = f"{tenant_id}:{subject_id}:{namespace}:{key}"
+        entry = self.long_term.get(storage_key)
+        if entry and entry.retention_until and entry.retention_until <= time.time():
+            del self.long_term[storage_key]
+            return None
         if entry:
             entry.last_accessed = time.time()
         return entry
 
-    def search_long_term(self, query: str,
-                         top_k: int = 5) -> list[MemoryEntry]:
+    def search_long_term(self, query: str, top_k: int = 5, *,
+                         tenant_id: str = "default",
+                         subject_id: str = "anonymous") -> list[MemoryEntry]:
         """搜索长期记忆（简化实现：关键词匹配）"""
         query_lower = query.lower()
         scored = []
         for entry in self.long_term.values():
+            if entry.tenant_id != tenant_id or entry.subject_id != subject_id:
+                continue
+            if entry.retention_until and entry.retention_until <= time.time():
+                continue
             score = 0
             if query_lower in entry.content.lower():
                 score += 1
@@ -204,12 +236,19 @@ class MemorySystem:
             entry.last_accessed = time.time()
         return results
 
-    def forget(self, key: str) -> bool:
-        """遗忘长期记忆"""
-        if key in self.long_term:
-            del self.long_term[key]
+    def forget(self, key: str, *, tenant_id: str = "default",
+               subject_id: str = "anonymous",
+               namespace: str = "preference") -> bool:
+        """删除主存储记录；生产实现还必须传播到索引、缓存和备份策略。"""
+        storage_key = f"{tenant_id}:{subject_id}:{namespace}:{key}"
+        if storage_key in self.long_term:
+            del self.long_term[storage_key]
             return True
         return False
+
+    def _forget_storage_key(self, storage_key: str) -> bool:
+        """供保留策略使用；业务调用仍应通过带租户边界的 forget()。"""
+        return self.long_term.pop(storage_key, None) is not None
 
     # ── 记忆压缩 ────────────────────────────────
 
@@ -225,7 +264,9 @@ class MemorySystem:
                 self.save_to_long_term(
                     key=f"archive_{entry.id}",
                     content=entry.content,
-                    importance=entry.importance
+                    importance=entry.importance,
+                    namespace="task_archive",
+                    provenance="conversation_compaction",
                 )
                 self.short_term.remove(entry)  # 归档后释放短期记忆空间
 
@@ -268,12 +309,19 @@ def main():
     memory.save_to_long_term(
         key="user_name",
         content="用户叫小明，是一名 Python 开发者",
-        importance=5
+        importance=5,
+        subject_id="user-001",
+        trust="user_confirmed",
+        consent=True,
     )
     memory.save_to_long_term(
         key="asyncio_summary",
         content="asyncio 核心概念: event loop, coroutine, task, future, await/async",
-        importance=4
+        importance=4,
+        subject_id="user-001",
+        namespace="saved_note",
+        trust="user_confirmed",
+        consent=True,
     )
 
     # 打印统计
@@ -284,13 +332,13 @@ def main():
 
     # 检索
     print(f"\n  检索长期记忆:")
-    entry = memory.recall_from_long_term("user_name")
+    entry = memory.recall_from_long_term("user_name", subject_id="user-001")
     if entry:
         print(f"    user_name: {entry.content}")
 
     # 搜索
     print(f"\n  搜索 'asyncio':")
-    results = memory.search_long_term("asyncio")
+    results = memory.search_long_term("asyncio", subject_id="user-001")
     for r in results:
         print(f"    [{r.importance}] {r.content[:80]}")
 
@@ -308,8 +356,6 @@ if __name__ == "__main__":
 ---
 
 ## 3. 记忆检索策略
-
-**图 8-2：记忆生命周期与检索流程**
 
 ```mermaid
 flowchart TD
@@ -332,6 +378,8 @@ flowchart TD
     D --> N
     F -.->|TTL / LRU / 重要性衰减| O[遗忘]
 ```
+
+> **图 8-2：** 记忆生命周期与检索流程。短期状态在预算压力下压缩或归档，检索结果经工作记忆进入 Context；遗忘策略独立作用于持久化记录。
 
 ### 3.1 检索方式对比
 
@@ -395,6 +443,8 @@ class SemanticMemory(MemorySystem):
 
 推荐的处理顺序是：先根据任务确定需要的是“状态”还是“事实”；对事实检索保留来源和更新时间；仅把经过用户确认或明确归纳的稳定信息写入长期记忆。两类系统可以共享 Embedding 或检索基础设施，但应保留不同的权限、保留期和删除策略。
 
+向量数据库只是可能的存储或索引实现，不是 Memory 的定义。RAG 是“检索证据并增强当前生成”的流程，也不是 Memory。生产系统应避免以下等式：`Vector Store = Memory`、`RAG = Memory`、`Conversation Log = Long-term Memory`。是否属于 Memory 取决于写入主体、用途、可修改/遗忘规则和跨 Run 生命周期，而不是底层是否使用 Embedding。
+
 > **来源类型：** 推导分析 —— 基于本书对 Context、Memory 与外部 Tool 的职责划分
 
 ### 3.4 知识接入与可引用检索流程
@@ -443,7 +493,7 @@ class MemoryWithForgetting(MemorySystem):
             if entry.importance < threshold
         ]
         for key in to_forget:
-            self.forget(key)
+            self._forget_storage_key(key)
         return len(to_forget)
 
     def forget_by_age(self, max_age_seconds: float):
@@ -454,7 +504,7 @@ class MemoryWithForgetting(MemorySystem):
             if now - entry.timestamp > max_age_seconds
         ]
         for key in to_forget:
-            self.forget(key)
+            self._forget_storage_key(key)
         return len(to_forget)
 
     def forget_by_lru(self, keep_count: int):
@@ -470,7 +520,7 @@ class MemoryWithForgetting(MemorySystem):
         )
         to_forget = [key for key, _ in sorted_entries[keep_count:]]
         for key in to_forget:
-            self.forget(key)
+            self._forget_storage_key(key)
         return len(to_forget)
 ```
 
@@ -482,7 +532,10 @@ class MemoryWithForgetting(MemorySystem):
 2. **重要性标注：** 对记忆标注重要性，优先保留高重要性记忆。
 3. **定期清理：** 实施遗忘策略，防止记忆无限增长。
 4. **记忆压缩：** 将短期记忆中的重要内容归档到长期记忆。
-5. **检索优化：** 对大量长期记忆使用语义搜索而非关键词匹配。
+5. **检索优化：** 根据查询类型组合精确键、结构化过滤、全文/关键词和语义检索；先做租户与权限过滤，再校准混合排序。
+6. **租户与主体隔离：** 每次写入和查询都携带 tenant、subject 与 namespace，不能先全局检索再在应用层过滤。
+7. **来源与信任分离：** Tool 输出和模型推断默认是不可信 Observation；只有经过规则验证或用户确认的信息才能升级为长期偏好。
+8. **删除必须可证明：** 用户删除请求应传播到主存储、全文/向量索引、缓存和受保留策略约束的备份，并留下不含原文的审计证明。
 
 ---
 

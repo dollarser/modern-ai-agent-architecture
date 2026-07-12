@@ -29,7 +29,7 @@
 ## 第五部分：规模化与生产
 
 - [第 15 章 Agent 设计模式](chapters/15-design-patterns/README.md)
-- [第 16 章 增强版 Agent 最终组装](chapters/16-enhanced-agent/README.md)
+- [第 16 章 Agent Host 与场景最终组装](chapters/16-agent-host/README.md)
 - [第 17 章 工程实践与生产部署](chapters/17-engineering-practice/README.md)
 - [第 18 章 最佳实践、评估与反模式](chapters/18-best-practices/README.md)
 
@@ -56,5 +56,6 @@
 | 初学者（系统学习） | 第 1～7 章顺序阅读 |
 | AI 应用开发者 | 第 2 章 → 第 6 章 → 第 13 章 → 第 8 章 → 第 17 章 |
 | Agent Framework 开发者 | 第 2 章 → 第 5 章 → 第 9 章 → 第 11 章 → 第 15 章 |
+| Coding Agent 实践者 | 第 3 章 → 第 4 章 → 第 6～7 章 → 第 9～13 章 → 第 16～18 章 |
 | IDE 插件开发者 | 第 2 章 → 第 10 章 → 第 13 章 → 第 19 章 |
 | 企业平台开发者 | 第 2 章 → 第 14 章 → 第 19 章 → 第 17 章 → 第 18 章 |

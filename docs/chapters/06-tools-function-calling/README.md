@@ -102,7 +102,7 @@ sequenceDiagram
 graph TD
     TA[Tool 抽象<br/>名称 + 描述 + Schema + 执行函数] --> BT[Built-in Tool<br/>框架内置，无需安装]
     TA --> MCPT[MCP Tool<br/>通过 MCP 协议发现]
-    TA --> PT[Plugin Tool<br/>通过插件机制加载]
+    TA --> PT[Plugin-contributed Tool<br/>来源为插件包]
     BT --> FS[文件系统 Tool]
     BT --> SH[Shell Tool]
     BT --> SE[搜索 Tool]
@@ -111,7 +111,7 @@ graph TD
     MCPT --> Custom[自定义 Tool]
 ```
 
-> **图 6-2：** Tool 抽象层次。所有 Tool 共享统一接口，但来源不同：Built-in（框架内置）、MCP（协议发现）、Plugin（插件加载）。
+> **图 6-2：** Tool 抽象层次。所有 Tool 共享统一调用接口，但来源不同：Built-in（Host 内置）、MCP（协议接入）、Plugin-contributed（由插件包贡献）。Plugin 本身不是 Tool 类型。
 
 ### 2.4 Tool 调用决策流程
 
@@ -136,6 +136,19 @@ flowchart TD
 
 > **图 6-3：** Tool 调用决策树。Agent 根据任务类型选择合适的 Tool，验证参数后执行，处理结果后判断是否继续。
 
+### 2.5 Tool、Function Calling、Handler、API 与 Command
+
+| 概念 | 所在边界 | 职责 |
+|------|----------|------|
+| Tool Definition | Host ↔ Model | 名称、描述、输入/输出 Schema 与副作用契约 |
+| Function/Tool Calling | Model → Host | 模型表达“希望调用哪个 Tool、参数是什么”的结构化机制 |
+| Tool Handler | Runtime 内执行边界 | 校验后执行 Tool，并返回 Observation |
+| API / SDK / CLI | Handler ↔ 下游系统 | Handler 使用的具体集成接口，不自动成为模型 Tool |
+| Slash Command | User → Product | 用户显式启动任务或工作流的入口，不是 Tool 授权 |
+| MCP Resource | Host ↔ MCP Server | 可读取上下文数据的协议原语，不应默认为有副作用 Tool |
+
+`Function Calling ≠ Function Execution`：模型只产生调用请求，Host 决定是否执行。`API ≠ Connector`、`CLI Command ≠ Tool`；只有经过 Schema、Policy 和 Runtime 包装后，它们才可能成为 Tool Handler 的底层实现。
+
 ---
 
 ## 3. Tool 设计
@@ -156,6 +169,8 @@ class ToolDefinition:
     parameters: dict             # JSON Schema 格式的参数定义
     handler: Callable            # 实际执行函数
     required: list[str] = None   # 必填参数列表
+    side_effect: bool = False
+    idempotent: bool = True
 
     def __post_init__(self):
         if self.required is None:
@@ -230,6 +245,8 @@ class FileReadTool:
 
     name: str = "read_file"
     description: str = "读取指定文件的内容。当需要查看文件内容时使用。"
+    workspace_root: str = "./workspace"
+    max_bytes: int = 1024 * 1024
 
     @property
     def parameters(self) -> dict:
@@ -245,11 +262,21 @@ class FileReadTool:
         }
 
     def handler(self, path: str) -> dict:
-        """读取文件"""
+        """只读取 Workspace Root 内的普通文件，并限制返回大小。"""
+        from pathlib import Path
         try:
-            with open(path, "r") as f:
-                content = f.read()
-            return {"success": True, "content": content}
+            root = Path(self.workspace_root).resolve(strict=True)
+            target = (root / path).resolve(strict=True)
+            if not target.is_relative_to(root) or not target.is_file():
+                return {"success": False, "error": "路径不在允许工作区内"}
+            with target.open("r", encoding="utf-8") as f:
+                content = f.read(self.max_bytes + 1)
+            if len(content.encode("utf-8")) > self.max_bytes:
+                return {
+                    "success": False,
+                    "error": "文件超过 Tool 返回上限，请使用分页读取",
+                }
+            return {"success": True, "content": content, "path": str(target.relative_to(root))}
         except FileNotFoundError:
             return {"success": False, "error": f"文件不存在: {path}"}
         except Exception as e:
@@ -324,7 +351,7 @@ final_messages = request_messages + [response, tool_result]
 
 ```python
 """
-Function Calling 完整实现
+Function Calling 教学实现
 运行环境：Python 3.10+
 依赖：openai>=1.0.0
 注意：本节代码引用前文定义的 Tool 类和 FunctionCall 等结构，
@@ -506,7 +533,8 @@ class SafeToolExecutor(ToolExecutor):
     """带安全处理的 Tool 执行器"""
 
     def execute(self, name: str, arguments: dict,
-                max_retries: int = 2) -> dict:
+                max_retries: int = 2,
+                idempotency_key: str | None = None) -> dict:
         """执行 Tool，带重试和错误处理"""
         tool = self._tools.get(name)
         if not tool:
@@ -515,19 +543,35 @@ class SafeToolExecutor(ToolExecutor):
                 "error": f"Tool '{name}' 不存在",
                 "retryable": False
             }
+        if getattr(tool, "side_effect", False) and not idempotency_key:
+            return {
+                "success": False,
+                "error": "副作用 Tool 必须提供 idempotency_key",
+                "retryable": False,
+            }
+
+        import random
+        import time
 
         for attempt in range(max_retries + 1):
             try:
                 result = tool.handler(**arguments)
                 return result
             except ToolError as e:
-                if not e.retryable or attempt == max_retries:
+                can_retry = (
+                    e.retryable
+                    and getattr(tool, "idempotent", False)
+                    and attempt < max_retries
+                )
+                if not can_retry:
                     return {
                         "success": False,
                         "error": e.message,
                         "retryable": e.retryable,
                         "attempts": attempt + 1
                     }
+                # 指数退避 + 抖动；真实实现还应尊重下游 Retry-After。
+                time.sleep(min(2 ** attempt * 0.1 + random.random() * 0.05, 2.0))
             except Exception as e:
                 return {
                     "success": False,
@@ -551,6 +595,8 @@ class SafeToolExecutor(ToolExecutor):
 4. **处理部分失败：** 当多个 Tool 并行调用时，处理部分成功部分失败的情况。
 5. **控制 Tool 数量：** 注册的 Tool 过多会导致模型选择困难。合理分组，按需注册。
 6. **Tool 幂等性：** 对于有副作用的 Tool（如发送邮件），确保支持幂等调用。
+7. **最小资源边界：** 文件、网络和数据库 Tool 必须限定 Workspace、Host/Origin、租户与返回大小。
+8. **错误要可分类：** 区分 validation、authorization、conflict、transient、timeout 和 cancelled；只有明确可重试且幂等的错误进入重试。
 
 ---
 

@@ -10,6 +10,9 @@ on:
       - '**/*.md'
       - '**/*.mermaid'
 
+permissions:
+  contents: read
+
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -21,12 +24,8 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install Mermaid parser
-        run: npm install --no-save --package-lock=false mermaid@11.16.0 jsdom@29.1.1
+      - name: Install documentation tooling
+        run: npm ci
 
-      - name: Extract Mermaid diagrams
-        run: |
-          python scripts/extract_mermaid.py . /tmp/mermaid-snippets
-
-      - name: Validate Mermaid syntax
-        run: node scripts/check_mermaid.mjs /tmp/mermaid-snippets
+      - name: Validate Mermaid diagrams
+        run: npm run check:mermaid

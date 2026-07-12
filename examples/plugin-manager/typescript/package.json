@@ -1,0 +1,5 @@
+{
+  "name": "plugin-manager-example", "version": "1.0.0", "type": "module",
+  "scripts": { "build": "tsc", "test": "npm run build --silent && node dist/test.js" },
+  "devDependencies": { "@types/node": "^20.11.30", "typescript": "^5.4.3" }
+}

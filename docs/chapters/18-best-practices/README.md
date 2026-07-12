@@ -15,6 +15,7 @@
 2. 识别和避免 Agent 开发中的常见反模式
 3. 建立 Agent 设计与评估的决策框架
 4. 为任务结果、执行轨迹、安全和成本建立可回归的评估基线
+5. 区分 Agent 内部循环与跨 Run Loop Engineering，并理解 Agentic Engineering 总框架
 
 ---
 
@@ -63,7 +64,7 @@
 | 分层存储 | 短期、工作、长期记忆各司其职 | 第 8 章 |
 | 重要性标注 | 标注记忆重要性，优先保留高重要性记忆 | 第 8 章 |
 | 定期清理 | 实施遗忘策略，防止记忆无限增长 | 第 8 章 |
-| 检索优化 | 大量记忆使用语义搜索，而非关键词匹配 | 第 8 章 |
+| 检索优化 | 根据查询类型组合结构化过滤、全文/关键词和语义检索，再做权限过滤与排序 | 第 8 章 |
 
 ### 1.5 Hooks
 
@@ -71,10 +72,20 @@
 |------|------|---------|
 | 只做横切关注点 | 日志、监控、权限、脱敏，不包含业务逻辑 | 第 10 章 |
 | 快速执行 | Hook 不应阻塞主流程，耗时操作异步化 | 第 10 章 |
-| 失败隔离 | 一个 Hook 失败不影响其他 Hook 和主流程 | 第 10 章 |
+| 失败语义分类 | Guard 失败阻断操作；Observer 失败隔离并告警；Transformation 按契约回滚或拒绝 | 第 10、17 章 |
 | 优先级排序 | 权限检查 HIGH，日志 LOW | 第 10 章 |
 
-### 1.6 工程实践
+### 1.6 安装型扩展
+
+| 实践 | 说明 | 参考章节 |
+|------|------|---------|
+| 安装不等于授权 | Manifest 是权限请求，Host 和 Tool 调用边界仍须授权 | 第 12--14、16 章 |
+| 来源可追踪 | 记录来源、版本和校验和，更新采用原子替换并支持回滚 | 第 12、17 章 |
+| 凭据不泄漏 | MCP 环境变量保存受控引用，列表、日志和 Trace 必须脱敏 | 第 13、17 章 |
+| 生命周期对称 | 启用、禁用、删除和关闭同步处理连接与 Registry 资源 | 第 13、16 章 |
+| 供应链隔离 | Skill、MCP 子进程和 Plugin 使用签名、Allowlist、沙箱和审计 | 第 12--14、17 章 |
+
+### 1.7 工程实践
 
 | 实践 | 说明 | 参考章节 |
 |------|------|---------|
@@ -131,58 +142,112 @@
 
 先判断任务是否真的需要循环决策，再按工具调用、动态规划、多角色协作和持久化需求逐层增加复杂度。第 15 章图 15-2 从设计模式角度给出更完整的模式选择，可与本图对照阅读。
 
-**图 18-1：架构决策流程图**
-
 ```mermaid
 flowchart TD
-    A["需要构建 Agent?"] --> B{单步推理即可?}
-    B -->|是| C["LLM + Prompt Engineering<br/>简单、快速"]
-    B -->|否| D{需要工具调用?}
-    D -->|否| E["Chain-of-Thought<br/>多步推理"]
-    D -->|是| F{需要动态规划?}
-    F -->|否| G["ReAct + 最小 Tool 集<br/>响应式工具调用"]
-    F -->|是| H{需要多角色协作?}
+    A["需要自动完成任务?"] --> B{步骤能预先确定?}
+    B -->|是| C["Application Code / Workflow<br/>确定性优先"]
+    B -->|否| D{需要根据 Observation<br/>动态选择下一步?}
+    D -->|否| E["LLM 调用 + 结构化输出"]
+    D -->|是| F{需要开放式规划?}
+    F -->|否| G["Agentic Workflow<br/>受限决策节点"]
+    F -->|是| H{需要独立多角色?}
     H -->|否| I["Plan-and-Execute<br/>+ Reflection"]
     H -->|是| J{需要持久化和事件驱动?}
     J -->|否| K["Multi-Agent + Handoff"]
     J -->|是| L["Multi-Agent + Event Bus<br/>+ State Persistence"]
 ```
 
-### 3.2 Tool 集成决策
+> **图 18-1：** 架构决策流程。从确定性应用代码或 Workflow 开始，只有下一步确实依赖开放式 Observation 时才引入 Agent，再按规划和协作需求增加复杂度。
 
-**图 18-2：Tool 集成决策流程**
+### 3.2 Tool 集成决策
 
 ```mermaid
 flowchart TD
     A["需要集成外部能力?"] --> B{主要部署与扩展边界?}
     B -->|核心内置 / 高频调用| C["Built-in Tool<br/>直接集成到 Agent 核心"]
     B -->|跨进程 / 跨产品互操作| E["MCP Server<br/>标准协议连接"]
-    B -->|Host 扩展包| G["Plugin<br/>Tool + Skill + 配置"]
+    B -->|Host 扩展包| G["Plugin Bundle<br/>可贡献 Tool / Skill / 配置"]
     B -->|一次性专用集成| H["直接调用 API<br/>应用层适配"]
 ```
+
+> **图 18-2：** Tool 集成决策流程。选型依据是部署、信任和分发边界；Plugin 是扩展包，MCP 是协议，二者都不等同于 Tool。
 
 选择依据不是能力名称，而是部署和扩展边界：核心高频能力适合内置，跨进程或跨产品互操作优先考虑 MCP，Host 自有扩展包使用 Plugin，一次性集成可直接适配 API。
 
 ### 3.3 Memory 策略决策
 
-**图 18-3：Memory 策略决策流程**
-
 ```mermaid
 flowchart TD
     A["需要记忆什么?"] --> B{记忆类型?}
     B -->|当前对话| C["短期记忆<br/>deque / 滑动窗口"]
-    B -->|任务状态| D["工作记忆<br/>dict / session"]
+    B -->|Run 状态| D["工作记忆 / Checkpoint<br/>Run-scoped"]
     B -->|用户偏好| E["可撤销长期记忆<br/>数据库"]
     B -->|项目知识| F["Knowledge System / RAG<br/>来源、权限、检索"]
     B -->|临时中间结果| G["工作记忆<br/>任务完成后清理"]
     C --> H["策略: FIFO 淘汰"]
     D --> I["策略: 任务结束时清除"]
     E --> J["策略: 用户确认、保留期与删除"]
-    F --> K["策略: 权限过滤、语义检索与引用"]
+    F --> K["策略: 权限过滤、混合检索与引用"]
     G --> L["策略: TTL 过期"]
 ```
 
+> **图 18-3：** Memory 策略决策流程。Run 状态、用户偏好、外部知识和临时 Artifact 使用不同的身份、写入、检索、保留与删除策略。
+
 Memory 选型首先取决于信息用途，而不是存储技术。会话、任务状态、用户偏好和项目知识应采用不同的写入确认、权限、保留与删除策略。
+
+### 3.4 Loop Engineering：设计跨 Run 的反馈循环
+
+本书把 Loop Engineering 保守地定义为：设计一个**有触发、有验证、有状态、有预算且有明确停止规则**的跨 Run 循环。它位于单次 Agent Harness 外层：
+
+```text
+Loop Specification
+├── Trigger：定时、事件、队列或人工启动
+├── Work Discovery：本轮处理哪些目标
+├── Context Preparation：为新 Run 准备最小输入
+├── Isolated Run：独立工作区、身份、预算和能力快照
+├── Verifier：测试、规则、人工或独立评估者
+├── State Persistence：记录结果、失败与下一轮游标
+├── Stop Rule：完成、失败、预算耗尽、无进展或人工停止
+├── Human Gate：合并、部署、发送等不可逆边界
+└── Escalation：无法验证或连续失败时转人工
+```
+
+必须区分两种循环：
+
+| 循环 | 所在范围 | 典型状态 |
+|------|----------|----------|
+| Agent Loop | 单次 Run 内部 | Reason → Act → Observe → Replan |
+| Operational Loop | 多个 Run 外部 | Discover → Dispatch → Verify → Persist → Stop/Repeat |
+
+`Loop Engineering ≠ 写一个 while 循环`，也不等于让 Agent 无限自治。生成者自称“完成”不能充当唯一 Verifier；验证失败应产生结构化证据和终态，而不是无界地把同一 Prompt 再发一次。
+
+#### Loop 反模式
+
+- 没有最大轮次、时间、Token 或费用预算。
+- 生成与验证共享同一未经核查的假设，没有独立证据。
+- 每轮携带全部历史，导致 Context 膨胀和错误累积。
+- 外部副作用缺少幂等键，重跑会重复发送、写入或部署。
+- 自动合并、部署或关闭工单，没有 Human Gate 或补偿策略。
+- 只记录最终文本，不保存 Run、Verifier、Artifact 和停止原因。
+
+Loop Engineering 是较新的工作术语，尚无跨产品统一标准。本书采用上述工程定义用于组织实践，不把它写成取代 Prompt、Context 或 Harness Engineering 的必然阶段。
+
+### 3.5 Agentic Engineering：生产工程总框架
+
+Agentic Engineering 不是又一个 Runtime 组件，而是交付 Agent 系统的总称：
+
+```text
+Agentic Engineering
+├── Prompt / Context Engineering
+├── Tool / Workflow Engineering
+├── Harness / Loop Engineering
+├── Evaluation Engineering
+├── Safety / Policy Engineering
+├── Data / Memory Governance
+└── Deployment / Observability / Operations
+```
+
+一个系统只有“能调用 Tool”还不足以称为工程完整。至少要能回答：目标和成功标准是什么、模型看到了什么、动作由谁授权、失败如何恢复、结果如何验证、成本如何限制、数据如何删除、版本变化如何回归。第 16 章提供 Harness 参考实现，本章的评估和反模式、第 17 章的安全与运维共同构成 Agentic Engineering 的生产闭环。
 
 ---
 
@@ -294,7 +359,7 @@ class MockLLMProvider:
 
 ### 6.4 关键评估指标
 
-**功能性指标：** 任务完成率、步骤数（越少越好）、工具调用准确率、错误恢复率
+**功能性指标：** 任务完成率、满足质量与安全不变量后的冗余步骤数、工具调用准确率、错误恢复率。步骤少不天然更好：必要的验证、审批和来源核查不能为了压缩轨迹而删除。
 
 **质量性指标：** 输出正确性、相关性、完整性、一致性
 
@@ -313,7 +378,7 @@ class MockLLMProvider:
 | 任务与前置状态 | 输入、可用 Tool、检索语料版本、用户权限 | “只读用户查询本周订单” |
 | 结果断言 | 必须包含的事实、结构或可接受的评分范围 | 订单总数与引用来源一致 |
 | 轨迹断言 | 必须/禁止的 Tool、最大调用次数、依赖顺序 | 只能调用 `orders.search`，不得调用写入 Tool |
-| 安全断言 | 审批、脱敏、租户隔离和拒绝行为 | 缺少审批时写操作必须停在 `pending` |
+| 安全断言 | 审批、脱敏、租户隔离和拒绝行为 | 缺少审批时写操作不得执行；异步审批可停在 `pending`，同步默认拒绝可进入 `denied/failed` |
 | 资源包络 | 延迟、Token、下游费用和重试上限 | P95 延迟、最大步骤数和会话预算 |
 | 可复现信息 | 模型、Prompt、策略、代码、数据集和评估器版本 | 每次运行均写入 trace metadata |
 

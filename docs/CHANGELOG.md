@@ -1,12 +1,30 @@
 # 变更日志
 
+> 历史条目中的 “Enhanced Agent” 是第 16 章旧称；当前对应 `AgentHost` 与 `examples/agent-host/`，不表示仍保留兼容类型或旧目录。
+
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/) 规范。
 
 ## [Unreleased] - 2026-07-11
 
+### 最终版定位
+- 冻结最终学习成果：兼顾 AI Agent 概念、理论与开发，并以可对话、可安装扩展、可完成简单编码任务的教学型 Agent Host 为落点。
+- 新增最终版出版审查基线与验收矩阵；当时识别的 Patch/测试闭环和 Application Session → Run 两项 P1 已在本版本后续修复并通过双语言测试。
+- 为 Agent Host 新增 Python/TypeScript 对等的受限 Coding Agent：工作区 Read/Search、需审批的精确 Patch、固定 argv 测试与结果汇报；覆盖默认拒绝和路径越界。
+- 新增 Python/TypeScript 对等的 `ConversationApplication + JsonSessionStore`，实现 Session 多轮消息到独立 Task/Run 的映射，并将受限历史显式传入新 Run 的 Planner Context。
+- 完成执行、状态、扩展、协作、治理与工程实践六条纵向主线终审；统一 Task 级重试与 Tool 重试、Policy 身份、扩展阶段、审批状态和 Plugin 清理失败语义。
+- 新增 Skill Catalog、MCP Server Manager、Plugin Catalog 到 AgentHost 的双语言可运行 Adapter；MCP Manager Connection 补齐 Tool 调用和已启用会话输出。
+- 重构 PRD 权威层级：BookSpec 1.0 更新为当前目录、概念体系、AgentHost 能力和 2026-07-13 验收基线；V6/V7 明确标为历史归档，并新增统一当前基线快照。
+- 整理 GitHub 仓库结构：审查记录迁入 `reviews/`，新增根贡献入口，更新根 README、真实项目树、文档校验脚本和过时示例数量。
+- 新增可复用的《与 AI 协作编写完整技术书》工作流，覆盖需求、BookSpec、正式写作、专项/纵向审查、架构修订、最终 PRD 回写与出版冻结。
+- 补充作者对领域了解但不完全熟悉时的方法：认知边界、证据扫描、L1～L7 成果阶梯、行为验收契约、代表性任务、依赖图章节规划、暂定章节状态和二维覆盖矩阵。
+- 将 V6 拆分规范和整合版 V7 统一迁入 `specs/history/`；现行规范收敛到 `specs/book/`，共创方法保留在 `specs/` 根目录。
+- 将原 `PRD/` 重命名为更准确的 `specs/`，并统一现行规范文件为小写 kebab-case；历史文件保留原名。
+- 完成 GitHub 发布前校检：Mermaid CI 改用根锁文件，Python CI 正确区分测试工程与需参数 CLI，Actions 默认权限收窄为只读，并将根入口和现行规范纳入 Markdown lint。
+- 新增 `requirements-docs.txt` 固定已验证的 MkDocs 构建依赖，避免 CI 因上游最新版本漂移而无故失败。
+
 ### 重构
 - 将第 16 章重构为最终组装章：以 Port / Adapter 和 Composition Root 组合 Memory、完整生命周期 Hooks、带来源与状态的 Tool Router、MCP、Plugin、Human Approval、Handoff/Subagent 和 Event Bus。
-- 重构 `examples/enhanced-agent/` 的 Python 与 TypeScript 实现，新增上述能力的离线最小适配器与端到端契约测试，明确功能闭环与生产基础设施的边界。
+- 重构 `examples/agent-host/` 的 Python 与 TypeScript 实现，新增上述能力的离线最小适配器与端到端契约测试，明确功能闭环与生产基础设施的边界。
 
 ### 修正
 - 将 Tool Calling 与 Tool Registry 双语言示例中的 `eval` / `Function` 动态执行替换为受限算术解析器，只允许数字、括号和白名单运算符，并限制复杂度、指数与结果范围。
@@ -31,7 +49,7 @@
 ### 新增
 - 新增 `examples/runtime/` 双语言状态机及契约测试，覆盖完成、步数耗尽、及时超时和取消；为 Hooks 双语言示例补充 Guard、结果传播和观测失败隔离测试。
 - 新增 TypeScript 示例 CI，在 Node.js 18、20、22 上对全部工程执行锁文件安装、严格编译和可选测试。
-- 新增 `examples/enhanced-agent/` 的 Python 与 TypeScript 可运行实现及契约测试，覆盖 Adapter、Skills、依赖并行、重试、Hooks、Memory、Checkpoint 恢复和诚实终止状态。
+- 新增 `examples/agent-host/` 的 Python 与 TypeScript 可运行实现及契约测试，覆盖 Adapter、Skills、依赖并行、重试、Hooks、Memory、Checkpoint 恢复和诚实终止状态。
 - 第 16 章补充从第 7 章 MVP 逐章演进而来的最终 Agent 能力总览，明确 Runtime、Context、模型、Tool/MCP/Plugin、状态、编排与治理边界。
 - 为全部 20 章增加章末小结，统一收束核心边界、适用条件和工程取舍。
 - 第 2 章补充 Scaffolding、Harness、Runtime 与 Orchestration 的职责图和术语边界。
@@ -46,7 +64,7 @@
 ### 维护
 - 以 `modern-ai-agent-architecture` 作为公开仓库名，书名统一为《现代 AI Agent 架构：从原理到生产实践》，补充 GitHub 仓库首页并适配根目录 CI 与 Pages 路径。
 - 压缩第 18 章重复的文本树与 Mermaid 表达；统一双层初学者阅读路径、FAQ 索引命名和第 20 章定位；将第 19 章主观排名式措辞改为可核查的条件化描述。
-- 将 `PRD/BookSpec-1.0/` 补充为当前有效的书稿维护、审阅和验收规范；V7 仅保留为历史需求基线。
+- 将 `specs/book/` 补充为当前有效的书稿维护、审阅和验收规范；V7 仅保留为历史需求基线。
 - 重构为六部分学习路径：基础认知、构建首个 Agent、可靠运行、扩展与互操作、规模化与生产、案例与索引；MVP 前移至第 7 章，框架分析后移至第 19 章，并同步章节目录、链接、图号、学习路线和索引。
 - 新增 `examples/agent-mvp-minimal/` 的 Python 与 TypeScript 最小纵向切片；保留 `coding-agent-mvp` 作为跨组件组合预览，并收紧其 MCP 能力声明。
 - 复核当前数量：20 个章节、45 张 Mermaid 图、12 个独立示例工程、24 个双语言入口和 160 个 Markdown 表格；同步修正主页与 BookSpec 指标。
@@ -94,4 +112,4 @@
 | V4 | 历史演进、框架源码分析、设计模式、学习路线、最佳实践与反模式、事实验证 |
 | V5 | 项目工程化、发布部署 |
 | V6 | 开源项目结构、CI/CD、配套文档、示例工程、多平台支持 |
-| V7（当前） | 整合 V1~V6 全部优点，融合 BookSpec-1.0 模块化规范框架，形成完整统一的需求规格 |
+| V7（历史） | 整合 V1~V6 的需求基线；现行规范已迁移到 `specs/book/` |

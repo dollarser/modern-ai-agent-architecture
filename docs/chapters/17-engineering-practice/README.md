@@ -172,7 +172,7 @@ import asyncio
 import tempfile
 from pathlib import Path
 
-from main import AgentConfig, EnhancedAgent
+from main import AgentConfig, AutoApproveGate, DatabaseReviewAgent
 
 
 def test_checkpoint_resume():
@@ -180,12 +180,16 @@ def test_checkpoint_resume():
         checkpoint = Path(directory) / "cp.json"
         task = "查找数据库配置"
 
-        first = asyncio.run(EnhancedAgent(
+        first = asyncio.run(DatabaseReviewAgent(
             checkpoint,
             AgentConfig(interrupt_after_steps=1),
+            approval=AutoApproveGate(),
         ).run(task, "session-1"))
         second = asyncio.run(
-            EnhancedAgent(checkpoint).run(task, "session-1")
+            DatabaseReviewAgent(
+                checkpoint,
+                approval=AutoApproveGate(),
+            ).run(task, "session-1")
         )
 
         assert first["status"] == "interrupted"
@@ -193,12 +197,15 @@ def test_checkpoint_resume():
         assert second["resumed"] is True
 ```
 
-对应的完整测试位于 `examples/enhanced-agent/python/test_main.py` 和 `examples/enhanced-agent/typescript/test.ts`。测试层次建议如下：
+这里显式注入 `AutoApproveGate` 仅用于确定性的测试环境。第 16 章的生产安全默认值是拒绝高风险操作；生产代码应替换为真实审批实现，不能复制测试门禁。
+
+对应的完整测试位于 `examples/agent-host/python/test_main.py` 和 `examples/agent-host/typescript/test.ts`。测试层次建议如下：
 
 | 层次 | 隔离边界 | 重点断言 |
 |------|----------|----------|
 | Unit | Adapter、Planner、Tool、Policy、序列化器 | schema、纯函数结果、拒绝规则、错误映射 |
 | Integration | Runtime + Registry + Checkpoint Store | 状态迁移、恢复位置、依赖顺序、幂等键 |
+| Extension integration | Skill/Plugin Installer + MCP Manager + Runtime | 原子安装、配置恢复、启动注册、禁用/卸载清理、失败回滚 |
 | E2E | 固定模型版本 + 沙箱 + 测试外部系统 | 最终结果、轨迹约束、权限、成本与延迟预算 |
 
 运行仓库中的真实契约测试：
@@ -207,10 +214,13 @@ def test_checkpoint_resume():
 python -m unittest discover -s examples/agent-mvp-minimal/python -p 'test_*.py' -v
 python -m unittest discover -s examples/runtime/python -p 'test_*.py' -v
 python -m unittest discover -s examples/hooks/python -p 'test_*.py' -v
-python -m unittest discover -s examples/enhanced-agent/python -p 'test_*.py' -v
+python -m unittest discover -s examples/agent-host/python -p 'test_*.py' -v
+python -m unittest discover -s examples/skills/python -p 'test_*.py' -v
+python -m unittest discover -s examples/mcp-manager/python -p 'test_*.py' -v
+python -m unittest discover -s examples/plugin-manager/python -p 'test_*.py' -v
 npm --prefix examples/runtime/typescript test
 npm --prefix examples/hooks/typescript test
-npm --prefix examples/enhanced-agent/typescript test
+npm --prefix examples/agent-host/typescript test
 ```
 
 ---
@@ -261,6 +271,19 @@ class PermissionSystem:
 ```
 
 权限表采用 fail-closed：Tool 必须先注册所需权限，再由角色显式获得该权限。确需匿名访问的只读 Tool，也应注册明确的 `public` 策略，而不是依靠“没有配置即允许”。
+
+#### 身份、认证、授权与委派
+
+| 对象/阶段 | 含义 | 关键约束 |
+|-----------|------|----------|
+| User Identity | 发起或批准操作的人 | 与租户、组织和当前 Session 绑定 |
+| Agent Identity | Agent 定义及其运行身份 | 不是用户身份的复制品 |
+| Run Identity | 某次 Agent/Subagent 执行 | 带父子关系、预算和 Trace |
+| Service Identity | Connector/MCP Server 访问下游的服务主体 | Credential 不可进入 Prompt |
+| Credential | 证明身份的 Secret、Token 或证书 | 只保存引用，最小 Scope、短期和可轮换 |
+| Delegation Grant | 上游主体授予子 Run 的有限权限 | 只能收窄，带资源范围与过期时间 |
+
+Authentication 证明“是谁”，Authorization 判断“该身份是否可访问资源”，Policy 将身份、主体、参数、环境和风险组合成 `allow/ask/deny`，Approval 只处理 `ask` 的决定。Agent 使用用户授权不表示 Agent 就是用户；Subagent 也不得自动继承父 Run 的全部 Credential、Tool 或网络范围。
 
 ### 3.3 沙箱执行
 
@@ -321,9 +344,39 @@ Guardrails 不是只在 System Prompt 中写一条“请遵守规则”，而是
 | Sandbox 与网络 | 路径逃逸、命令注入、资源耗尽 | 文件/网络隔离、命令白名单、CPU/内存/时间限制 | 终止执行并记录审计事件 |
 | 最终输出与日志 | 泄露凭据、个人数据或内部内容 | 输出脱敏、字段级日志过滤、保留期控制 | 隐藏敏感字段并提示用户 |
 
-对每个高风险 Tool，应把“允许、需要确认、拒绝”设计为可测试的策略，而不是依赖模型自行判断。第 10 章的 Hook 适合承载策略检查，第 6 章的 Schema 适合承载参数约束，第 9 章的 Runtime 负责把拒绝、超时和取消变成一致的终止行为。
+对每个高风险 Tool，应把“允许、需要确认、拒绝”设计为可测试的策略，而不是依赖模型自行判断。第 10 章的 Guard Hook 可以作为调用 Policy 的生命周期挂载点，但不能成为唯一授权边界；第 6 章的 Schema 承载参数约束，第 9 章的 Runtime 负责在 Handler 前强制执行决定，并把拒绝、超时和取消变成一致终态。
 
 > **来源类型：** 推导分析 —— 基于纵深防御原则和本书 Tool、Hook、Runtime、Sandbox 的职责划分
+
+#### 统一安全控制链
+
+```mermaid
+flowchart LR
+    Request["Agent Tool Request"] --> Guard["Input Guardrail<br/>参数与内容检查"]
+    Guard --> Policy["Policy Engine<br/>allow / ask / deny"]
+    Policy -->|deny| Reject["结构化拒绝"]
+    Policy -->|ask| Approval["Approval Adapter<br/>用户或工作流决定"]
+    Policy -->|allow| Runtime["Runtime"]
+    Approval -->|批准且请求未变化| Runtime
+    Approval -->|拒绝/超时| Reject
+    Runtime --> Hook["Guard Hook<br/>生命周期挂载点"]
+    Hook --> Sandbox["Sandbox<br/>资源隔离与硬限制"]
+    Sandbox --> Handler["Tool Handler"]
+    Handler --> Output["Output Guardrail<br/>脱敏与契约校验"]
+    Output --> Audit["Trace / Audit"]
+```
+
+> **图 17-2：** Policy、Approval、Guardrails、Hook 与 Sandbox 的职责链。Hook 是挂载机制，不天然是安全控制；Sandbox 是纵深防御，不能被上层批准关闭。
+
+| 概念 | 回答的问题 | 失败语义 |
+|------|------------|----------|
+| Policy | 当前主体对具体资源和参数是 allow、ask 还是 deny？ | 规则冲突或引擎错误默认拒绝 |
+| Approval | 如何取得并持久化 `ask` 的决定？ | 拒绝、超时或请求变化均不得执行 |
+| Guardrail | 输入、模型输出、Tool 和最终输出是否满足可执行约束？ | 安全 Guardrail fail-closed |
+| Hook | 在哪个生命周期点运行 Guard 或 Observer？ | Guard 失败阻断；Observer 失败隔离并告警 |
+| Sandbox | 即使上层判断错误，进程实际能访问哪些资源？ | 越界由执行环境强制终止 |
+
+因此 `Approval ≠ Authorization`、`Hook ≠ Guardrail`、`Policy ≠ Prompt Rule`、`Sandbox ≠ Tool Allowlist`。审批应绑定规范化 Tool 名、最终参数、资源预览、主体、能力快照、过期时间和幂等键；任一绑定值变化都需要重新决策。
 
 ### 3.5 Human-in-the-Loop：审批不是一次弹窗
 
@@ -343,8 +396,6 @@ Guardrails 不是只在 System Prompt 中写一条“请遵守规则”，而是
 ---
 
 ## 4. 部署方案
-
-**图 17-1：CI/CD 流水线全景**
 
 ```mermaid
 graph TD
@@ -370,6 +421,8 @@ graph TD
     N -->|是| P["✅ 发布完成"]
 ```
 
+> **图 17-1：** CI/CD 流水线全景。构建、测试和安全扫描失败会阻止发布；生产流量只在 Staging、冒烟测试和 Canary 健康检查通过后逐步放开。
+
 ### 4.1 Docker 部署
 
 ```dockerfile
@@ -378,13 +431,18 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+RUN groupadd --system agent && useradd --system --gid agent --home /app agent
+
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN python -m venv /opt/venv \
+    && /opt/venv/bin/pip install --no-cache-dir --require-hashes -r requirements.txt
 
-COPY src/ ./src/
-COPY config/ ./config/
+COPY --chown=agent:agent src/ ./src/
+COPY --chown=agent:agent config/ ./config/
 
-ENV AGENT_ENV=prod
+ENV AGENT_ENV=prod PATH="/opt/venv/bin:$PATH" PYTHONDONTWRITEBYTECODE=1
+
+USER agent
 
 CMD ["python", "-m", "src.main"]
 ```
@@ -396,11 +454,22 @@ services:
   agent:
     build: .
     environment:
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
       - AGENT_ENV=prod
+      - OPENAI_API_KEY_FILE=/run/secrets/openai_api_key
+    secrets:
+      - openai_api_key
     volumes:
       - ./data:/app/data
       - ./workspace:/app/workspace
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,noexec,nosuid,nodev
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 1g
+    cpus: 1.0
     restart: unless-stopped
 
   agent-api:
@@ -410,26 +479,62 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_API_KEY_FILE=/run/secrets/openai_api_key
+    secrets:
+      - openai_api_key
     depends_on:
-      - redis
-      - postgres
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    networks: [frontend, backend]
 
   redis:
     image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks: [backend]
 
   postgres:
     image: pgvector/pgvector:pg16
     environment:
       - POSTGRES_DB=agent
       - POSTGRES_USER=agent
-      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_PASSWORD_FILE=/run/secrets/db_password
+    secrets:
+      - db_password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agent -d agent"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    networks: [backend]
+
+secrets:
+  openai_api_key:
+    file: ./secrets/openai_api_key
+  db_password:
+    file: ./secrets/db_password
+
+networks:
+  frontend: {}
+  backend:
+    internal: true
 
 volumes:
   postgres_data:
 ```
+
+`*_FILE` 只是常见的容器 Secret 注入约定，应用必须显式读取对应文件；生产编排应优先使用云 Secret Manager、Kubernetes Secret CSI 或同类短期凭据机制。Compose 示例中的本地 Secret 文件不得提交到版本库。绑定的业务目录仍是显式可写例外，应配合工作区级路径策略；其余根文件系统保持只读。
 
 ### 4.2 部署检查清单
 
@@ -443,6 +548,9 @@ volumes:
 | ✅ 资源限制 | CPU/内存限制，防止资源耗尽 |
 | ✅ 网络策略 | 限制出站/入站流量 |
 | ✅ 备份策略 | 定期备份 Memory 和 Checkpoint |
+| ✅ 非 root 与最小能力 | `USER`、只读根文件系统、`cap_drop`、`no-new-privileges` |
+| ✅ Secret 生命周期 | 不提交 Secret 文件；使用短期凭据、轮换与 Secret Manager |
+| ✅ 供应链 | 锁定依赖 Hash 和基础镜像 Digest，生成 SBOM 并执行镜像签名/扫描 |
 
 ---
 
@@ -472,21 +580,21 @@ class StructuredLogger:
     """结构化日志"""
 
     @staticmethod
-    def log_agent_start(session_id: str, task: str):
-        logger.info("agent_start", session_id=session_id, task=task[:200])
+    def log_agent_start(run_id: str, task: str):
+        logger.info("agent_start", run_id=run_id, task=task[:200])
 
     @staticmethod
-    def log_tool_call(session_id: str, tool: str, args: dict, duration: float):
-        logger.info("tool_call", session_id=session_id, tool=tool,
+    def log_tool_call(run_id: str, tool: str, args: dict, duration: float):
+        logger.info("tool_call", run_id=run_id, tool=tool,
                      args_summary=str(args)[:200], duration_ms=duration * 1000)
 
     @staticmethod
-    def log_tool_error(session_id: str, tool: str, error: str):
-        logger.error("tool_error", session_id=session_id, tool=tool, error=error)
+    def log_tool_error(run_id: str, tool: str, error: str):
+        logger.error("tool_error", run_id=run_id, tool=tool, error=error)
 
     @staticmethod
-    def log_agent_finish(session_id: str, success: bool, steps: int, duration: float):
-        logger.info("agent_finish", session_id=session_id, success=success,
+    def log_agent_finish(run_id: str, success: bool, steps: int, duration: float):
+        logger.info("agent_finish", run_id=run_id, success=success,
                      steps=steps, duration_s=duration)
 ```
 

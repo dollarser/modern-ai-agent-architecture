@@ -103,7 +103,7 @@ nav:
     - 第14章 Plugin 体系: chapters/14-plugin-system/README.md
   - 第五部分 规模化与生产:
     - 第15章 Agent 设计模式: chapters/15-design-patterns/README.md
-    - 第16章 增强版 Agent 实现: chapters/16-enhanced-agent/README.md
+    - 第16章 Agent Host 与场景组装: chapters/16-agent-host/README.md
     - 第17章 工程实践与生产部署: chapters/17-engineering-practice/README.md
     - 第18章 最佳实践、评估与反模式: chapters/18-best-practices/README.md
   - 第六部分 案例与索引:
