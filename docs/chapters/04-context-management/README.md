@@ -16,7 +16,7 @@
 3. 理解上下文裁剪、压缩和优先级排序的算法
 4. 实现一个基本的 Context Manager
 5. 区分 Context 管理与 Context Engineering，并设计来源、权限、安全和评估边界
-5. 避免常见的 Context 管理反模式
+6. 避免常见的 Context 管理反模式
 
 ---
 

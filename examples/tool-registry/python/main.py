@@ -181,7 +181,9 @@ def main():
     print(f"\n  搜索 '搜索': {[t.name for t in results]}")
 
     print(f"  安全计算: {registry.execute('calculate', {'expr': '(2 + 3) * 4'})}")
-    print(f"  拒绝代码: {registry.execute('calculate', {'expr': '__import__(\"os\")'})}")
+    rejected_expression = '__import__("os")'
+    rejected_result = registry.execute("calculate", {"expr": rejected_expression})
+    print(f"  拒绝代码: {rejected_result}")
 
     # 动态注销
     print(f"\n  注销 'calculate'...")

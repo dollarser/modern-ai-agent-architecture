@@ -15,10 +15,10 @@
 2. 用 Port / Adapter 隔离 Runtime 与具体基础设施
 3. 让 Skills、MCP 和 Plugin 通过统一扩展边界进入 Agent
 4. 理解 Agent Host 组件与 Harness Engineering 实践的区别
-4. 在 Tool 副作用之前加入 Hook、策略和人工审批
-5. 用 Handoff、Subagent 和 Event Bus 完成最小编排闭环
-6. 区分“功能闭环完整”和“生产基础设施完整”
-7. 区分新运行、恢复、回放、任务冲突和失败终态
+5. 在 Tool 副作用之前加入 Hook、策略和人工审批
+6. 用 Handoff、Subagent 和 Event Bus 完成最小编排闭环
+7. 区分“功能闭环完整”和“生产基础设施完整”
+8. 区分新运行、恢复、回放、任务冲突和失败终态
 
 ---
 
