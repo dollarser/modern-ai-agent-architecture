@@ -244,7 +244,9 @@ Application / Agent Host
 │   ├── Tool
 │   └── Skill
 ├── 协议（Protocol）
-│   └── MCP
+│   ├── MCP
+│   ├── A2A
+│   └── ACP
 ├── 产品集成（Product Integration）
 │   └── Connector
 └── 分发单元（Distribution Unit）
@@ -256,7 +258,7 @@ Application / Agent Host
 #### 2.6.2 同一个扩展从安装到执行经过什么
 
 ```mermaid
-flowchart LR
+flowchart TB
     Package["Plugin / Skill 包"] --> Discover["发现"]
     Discover --> Verify["验证来源、版本、依赖、校验和"]
     Verify --> Install["安装到隔离目录"]
@@ -313,6 +315,7 @@ flowchart TB
 | Agent Run | Agent 对 Task 的一次有开始、终态和预算的执行尝试 | Session、Agent 定义 |
 | Subagent Run | 带 `parent_run_id` 和委派契约的子执行 | ExpertProfile、普通函数调用 |
 | Session | 多轮交互、身份和可共享状态的作用域 | 单次 Run、永久 Memory |
+| A2A Task | A2A 协议中的跨 Agent 工作单元，由服务端分配 `taskId`，可产生状态更新和 Artifact | Host 内部 Task、Agent Run、普通消息 |
 | Conversation | Session 中面向参与者的消息序列 | 完整 Runtime 状态或 Trace |
 | Checkpoint | 某个 Run 在某个 revision 的可恢复快照 | Memory、备份、审计日志 |
 | Trace | Run/子 Run/Tool 调用的因果与观测事件链 | 可直接恢复的状态快照 |
@@ -320,6 +323,32 @@ flowchart TB
 `resume` 从兼容 Checkpoint 继续未完成 Run；`replay` 读取或重演既有事件，默认不得再次产生外部副作用。`task_id` 用于业务目标，`run_id` 标识一次尝试，`idempotency_key` 用于下游副作用去重，三者不能复用为同一个概念。
 
 > **来源类型：** Fact + 工程推导 —— A2A 官方规范用 `contextId` 组合多个 Task，并为 Task 分配独立 ID；本书据此区分 Session/Context 与 Task，再为 Host 内部可恢复尝试定义 `run_id`。Trace/Span 的父子因果语义可与 OpenTelemetry 对齐，但 OpenTelemetry 是通用可观测性标准，不是 Agent 框架，也不定义 Task、Run 或 Session。
+
+#### 2.7.1 四个容易混淆的身份
+
+| 身份 | 由谁创建 | 作用域 | 典型状态 | 是否可直接恢复 |
+|---|---|---|---|---|
+| `Session` | Host 或应用 | 用户、租户或设备的一组交互 | active / idle / expired | 不能直接恢复执行，只能提供共享上下文 |
+| `Task` | Host 或业务系统 | 一个业务目标 | open / canceled / retried / resolved | 通过新的或已有 Run 继续 |
+| `Run` | Runtime | Task 的一次执行尝试 | created / running / waiting / completed / failed / canceled | 可以从兼容 Checkpoint 恢复 |
+| A2A `Task` | A2A Server | 跨 Agent 的协议任务 | submitted / working / input-required / completed / failed / canceled | 由协议操作继续、查询或取消；不等同于本地 Run |
+
+关系可以简化为：
+
+```text
+Session
+└── Task（本地业务目标）
+    ├── Run #1（一次执行尝试）
+    │   ├── Checkpoint
+    │   └── Subagent Run
+    └── Run #2（重试或恢复后的新尝试）
+
+Agent Run ──跨系统委派──> A2A Task
+                         ├── Message
+                         └── Artifact
+```
+
+不要把四个 ID 复用为同一个字段：`session_id` 表示交互作用域，`task_id` 表示业务目标，`run_id` 表示一次执行，A2A `taskId` 表示协议服务端管理的跨 Agent 任务。它们可以通过 metadata 或关联表建立映射，但不能假定天然一一对应。
 
 ### 2.8 Workflow、Agent 与 Orchestrator
 

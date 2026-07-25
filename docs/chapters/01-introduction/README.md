@@ -75,9 +75,11 @@
 | Prompt | 当前任务目标 | 任务开始时读取 |
 | Instructions | 跨任务的行为规则与约束 | 由 Host 按配置版本在执行前注入 |
 | Skills | 可复用工作流模板 | Agent 判断匹配时读取，不真正调用 |
-| Tools | 可执行的执行接口 | Planning 完成后调用 |
+| Tools | 可执行的执行接口 | Decision 获准后由 Runtime 调用 |
 | Built-in Tool | Agent 自带能力 | 无需安装，直接调用 |
 | MCP | 连接外部 Tool、Resource、Prompt 等能力的互操作协议 | Host 需要标准化接入外部能力时使用；不要求动态发现 |
+| A2A | 独立 Agent 之间交换能力、任务、状态和产物的互操作协议 | 需要跨 Agent 委派或协作时使用 |
+| ACP | Agent 与 IDE、CLI 或其他客户端之间的交互协议 | 需要把 Agent 接入多种开发客户端时使用 |
 | Connector | 面向 GitHub、Drive 等具体产品的集成配置与适配 | 需要管理服务身份、授权范围、端点和数据映射时使用 |
 | Plugin | 可安装、版本化和启停的一组 Host 扩展 | 需要分发 Tool、Skill、Hook、Connector 预设等能力时使用 |
 | Subagent | 由上层 Agent 委派、拥有受限上下文与预算的 Agent Run | 任务适合隔离、并行或专业化处理时运行 |
@@ -100,6 +102,8 @@
 | Plugin vs Skill/Tool | Plugin 是分发与生命周期单元；Skill 和 Tool 是它可以贡献的能力 |
 | Expert vs Subagent | Expert Profile 描述专业角色；Subagent 描述一次由父 Agent 委派的运行关系 |
 | Tool vs Function Calling | Tool 是能力抽象，Function Calling 是调用方式/协议 |
+| MCP vs A2A | MCP 连接 Host/Client 与外部能力；A2A 连接独立 Agent 并管理跨 Agent Task |
+| A2A vs ACP | A2A 面向 Agent-to-Agent 协作；ACP 面向 Agent 与客户端/编辑器之间的交互 |
 | Framework/SDK vs Agent | Framework/SDK 提供构建、编排和运行支持；Agent 是一次配置后的运行主体 |
 | Personal Assistant vs Code Agent | Personal Assistant 围绕用户、会话、主动触发和多渠道服务；Code Agent 围绕工作区、代码变更、测试和审查 |
 | Agent vs Agent Host | Agent 负责目标导向的决策；Host 提供身份、状态、工具、权限、沙箱和生命周期治理 |
@@ -113,21 +117,25 @@
 ### 3.1 演进路径总览
 
 ```mermaid
-flowchart LR
+flowchart TB
     subgraph Model[模型与决策范式]
+        direction LR
         LLM[LLM] --> Prompt[Prompt / Context]
         Prompt --> ReAct[ReAct / Tool Use]
         ReAct --> Reasoning[Reasoning Models]
     end
     subgraph System[系统工程能力]
+        direction LR
         Runtime[Runtime / SDK] --> State[Session / Memory / Checkpoint]
         State --> Harness[Harness / Sandbox / Verification]
     end
     subgraph Interop[互操作协议]
+        direction LR
         FC[Function Calling] --> MCP[MCP]
         MCP --> A2A[A2A / Agent Interoperability]
     end
     subgraph Products[应用形态]
+        direction LR
         Chat[Chat Application] --> Workflow[Agentic Workflow]
         Workflow --> Assistant[Personal Assistant]
         Workflow --> Code[Code Agent]
