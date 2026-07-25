@@ -8,7 +8,7 @@
 |------|------|---------|------|---------|
 | Hello Agent | `examples/hello-agent/` | 最小 Agent Loop | Python, TypeScript | 第1, 2章 |
 | Tool Calling | `examples/tool-calling/` | Function Calling, Tool 抽象 | Python, TypeScript | 第6章 |
-| Memory | `examples/memory/` | Memory 读写, 上下文窗口 | Python, TypeScript | 第 8 章 |
+| Memory | `examples/memory/` | Memory 读写、治理字段、Context Token 预算、Artifact View | Python, TypeScript | 第 4、8 章 |
 | Runtime | `examples/runtime/` | 终态、步数耗尽、单步超时与协作式取消 | Python, TypeScript | 第 9 章 |
 | Planning | `examples/planning/` | Plan-and-Execute | Python, TypeScript | 第5章 |
 | Hooks | `examples/hooks/` | Before/After Hook | Python, TypeScript | 第 10 章 |
@@ -21,6 +21,10 @@
 | Agent MVP Minimal | `examples/agent-mvp-minimal/` | 任务、规则规划、内置 Tool、观察与终止条件 | Python, TypeScript | 第5--7章 |
 | Coding Agent 组合预览 | `examples/coding-agent-mvp/` | 轻量 Memory、Tool 映射与回调的补充演示（非最终架构） | Python, TypeScript | 第 8--11、15--16 章 |
 | Agent Host | `examples/agent-host/` | Session→Task/Run、Skill/MCP/Plugin 安装面 Adapter、扩展治理、Database Review 和受限 Read/Search/Patch/Test | Python, TypeScript | 第 16 章 |
+| A2A Task / Artifact | `examples/a2a-task-artifact/` | Agent Card、幂等 Task、状态事件、Artifact 引用与租户访问控制 | Python, TypeScript | 第 15、16、18、20 章 |
+| Error Contract | `docs/references/Error-Contract.md` | Tool、Provider、审批、取消、恢复和预算错误的统一语义 | 文档契约 | 第 9、11、16、18 章 |
+| Evaluation Contract | `examples/evaluation-contract/` | JSON 评估用例、最终状态、Tool 轨迹、安全断言和版本化报告 | Python, TypeScript | 第 18 章 |
+| Model Capability Contract | `examples/model-capability-contract/` | Tool Calling、Structured Output、Streaming、Usage、Cancel 与能力降级 | Python, TypeScript | 第 2、17、18 章 |
 
 ## 运行方式
 
@@ -33,7 +37,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-`agent-mvp-minimal`、`agent-host`、`skills`、`mcp-manager`、`plugin-manager` 与 `tool-calling` 仅依赖 Python 标准库。
+所有 Python 示例仅依赖 Python 标准库；其中 `a2a-task-artifact`、`agent-host`、`evaluation-contract`、`hooks`、`mcp-manager`、`model-capability-contract`、`plugin-manager`、`runtime`、`skills` 和 `tool-registry` 提供契约测试。
 
 ### TypeScript 示例
 
@@ -47,7 +51,7 @@ npm test
 npm run start
 ```
 
-所有 TypeScript 工程都提供 `build`；`agent-host`、`hooks`、`runtime`、`skills`、`mcp-manager` 和 `plugin-manager` 提供 `test`。安装器与 Manager 示例没有无参数 `start` 入口，使用契约测试演示生命周期，不能假定每个工程都支持同一运行命令。
+所有 TypeScript 工程都提供 `build`；有契约测试的工程提供 `test`，安装器与 Manager 示例没有无参数 `start` 入口，使用契约测试演示生命周期，不能假定每个工程都支持同一运行命令。
 
 ## 示例规范
 

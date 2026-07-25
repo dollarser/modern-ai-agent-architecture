@@ -45,6 +45,15 @@ class SkillInstallerTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 installer.install(source)
 
+    def test_checksum_change_is_detectable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory); installer = SkillInstaller(base / "installed")
+            source = self.make_skill(base)
+            installer.install(source)
+            self.assertTrue(installer.catalog.verify_integrity("review"))
+            (base / "installed" / "review" / "SKILL.md").write_text("tampered", encoding="utf-8")
+            self.assertFalse(installer.catalog.verify_integrity("review"))
+
 
 if __name__ == "__main__":
     unittest.main()

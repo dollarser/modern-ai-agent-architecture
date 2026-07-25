@@ -1,5 +1,9 @@
 # 第 13 章：MCP：模型上下文协议
 
+> **维护边界：** 本章是 MCP 协议与 Client/Server/Manager 边界的唯一正文来源；第 16 章只描述 Host Adapter，第 17 章只补充认证、沙箱、供应链和运维约束。
+
+MCP Server/Connector 纳入全书统一扩展生命周期：`发现 → 验证 → 安装 → 启用 → 加载 → 授权 → 执行 → 卸载`。本章重点展开其中的协议初始化、能力协商、连接和 Tool 调用；安装治理见 Manager，用户与资源授权见 Host Policy，真实 Transport 与生产隔离见第 17 章。
+
 > **难度等级：** ⭐⭐⭐⭐
 > **所属模块：** 第四部分：扩展与互操作
 > **来源可信度：** 官方文档 / 源码 / 推导 / 观点
@@ -121,7 +125,7 @@ graph TD
 | Prompt Template | Server 提供的 Prompt 模板 |
 | Transport | 通信层；当前标准传输为 `stdio` 和 Streamable HTTP，旧版 HTTP+SSE 仅用于兼容 |
 
-> **来源类型：** Fact —— 基于当前 MCP 规范 v2025-11-25（核对日期：2026-07-12）。文中最小示例仍按 v2024-11-05 的基础能力集合讲解，不能直接作为当前协议实现；实现时必须协商双方共同支持的版本，并以 [MCP Versioning](https://modelcontextprotocol.io/docs/learn/versioning) 为准。
+> **来源类型：** Fact —— 基于当前 MCP 规范 v2025-11-25（核对日期：2026-07-24）。文中最小示例仍按 v2024-11-05 的基础能力集合讲解，不能直接作为当前协议实现；实现时必须协商双方共同支持的版本，并以 [MCP Versioning](https://modelcontextprotocol.io/docs/learn/versioning) 为准。
 
 ### 2.3 MCP 通信流程
 
@@ -146,7 +150,7 @@ sequenceDiagram
     Client-->>Agent: 返回结果
 ```
 
-> **图 13-2：** MCP 通信时序图。初始化、能力协商、`initialized` 通知、列出 Tool、调用 Tool 的最小完整流程。
+> **图 13-2：** MCP 通信最小教学时序图。初始化、能力协商、`initialized` 通知、列出 Tool、调用 Tool 的基础顺序；版本协商、认证、取消和重连以当前规范及真实 SDK 为准。
 
 ### 2.4 能力协商与双向能力
 
@@ -623,7 +627,7 @@ python main.py --config .agent/mcp.json list
 python main.py --config .agent/mcp.json disable catalog
 ```
 
-完整的 Python/TypeScript 离线实现位于 `examples/mcp-manager/`，测试使用 Fake Transport。生产 Adapter 应使用官方 SDK 实现真实初始化、版本/能力协商、`stdio` 进程或 Streamable HTTP、OAuth、超时、重连和 Server 身份验证。
+Python/TypeScript 离线 Manager 教学契约位于 `examples/mcp-manager/`；`examples/mcp-client/` 与 `examples/mcp-server/` 也明确标记为协议模型。它们验证 Host 管理、消息形状和 Tool 适配边界，不声称是当前 MCP Transport 的兼容实现。生产 Adapter 应使用官方 SDK 实现真实初始化、版本/能力协商、`stdio` 进程或 Streamable HTTP、OAuth、超时、重连和 Server 身份验证。
 
 ### 5.3 Connector：具体产品的集成层
 
@@ -773,7 +777,7 @@ MCP 是面向 LLM 应用的上下文和能力协议，提供 Tool、Resource、P
 | REF-5 | [MCP Lifecycle](https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle) | 官方规范 | 初始化、能力协商、超时与关闭 |
 | REF-6 | [MCP Authorization](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization) | 官方规范 | HTTP 传输的授权边界 |
 | REF-7 | [MCP v2025-11-25 Key Changes](https://modelcontextprotocol.io/specification/2025-11-25/changelog) | 官方规范 | Tasks、Schema 与授权等版本变化 |
-| REF-8 | [MCP Architecture](https://modelcontextprotocol.io/specification/2025-06-18/architecture) | 官方规范 | Host、Client、Server 的职责和一对一会话边界 |
+| REF-8 | [MCP Architecture](https://modelcontextprotocol.io/specification/2025-11-25/architecture) | 官方规范 | Host、Client、Server 的职责和一对一会话边界 |
 
 ---
 

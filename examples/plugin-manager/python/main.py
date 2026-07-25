@@ -74,6 +74,10 @@ class PluginCatalog:
             raise KeyError(f"Plugin 未安装: {name}")
         return self._load(directory)
 
+    def verify_integrity(self, name: str) -> bool:
+        item = self.get(name)
+        return PluginInstaller._checksum(item.path) == item.checksum
+
     @staticmethod
     def _load(directory: Path) -> InstalledPlugin:
         manifest = PluginManifest.parse(directory / "plugin.json")
@@ -148,6 +152,10 @@ class PluginInstaller:
         self._write_metadata(item.path, item.source, item.checksum, enabled)
         return self.catalog.get(name)
 
+    def revoke(self, name: str) -> InstalledPlugin:
+        """教学型撤销：立即禁用，生产系统还应记录撤销版本并通知运行中实例。"""
+        return self.set_enabled(name, False)
+
     def remove(self, name: str) -> None:
         item = self.catalog.get(name)
         dependents = [
@@ -169,7 +177,7 @@ class PluginInstaller:
     @staticmethod
     def _checksum(source: Path) -> str:
         digest = hashlib.sha256()
-        for path in sorted(item for item in source.rglob("*") if item.is_file()):
+        for path in sorted(item for item in source.rglob("*") if item.is_file() and item.name not in {".installed.json", ".installed.json.tmp"}):
             digest.update(path.relative_to(source).as_posix().encode()); digest.update(path.read_bytes())
         return digest.hexdigest()
 

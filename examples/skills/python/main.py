@@ -65,6 +65,10 @@ class SkillCatalog:
             raise KeyError(f"Skill 未安装: {name}")
         return self._load(path)
 
+    def verify_integrity(self, name: str) -> bool:
+        item = self.get(name)
+        return SkillInstaller._checksum(item.path) == item.checksum
+
     def match(self, task: str) -> list[InstalledSkill]:
         lowered = task.lower()
         return [
@@ -145,7 +149,7 @@ class SkillInstaller:
     @staticmethod
     def _checksum(source: Path) -> str:
         digest = hashlib.sha256()
-        for path in sorted(p for p in source.rglob("*") if p.is_file()):
+        for path in sorted(p for p in source.rglob("*") if p.is_file() and p.name not in {".installed.json", ".installed.json.tmp"}):
             digest.update(path.relative_to(source).as_posix().encode())
             digest.update(path.read_bytes())
         return digest.hexdigest()

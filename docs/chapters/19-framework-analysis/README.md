@@ -4,7 +4,7 @@
 > **所属模块：** 第六部分：案例与索引
 > **来源可信度：** 官方文档 / 源码 / 推导 / 观点
 > **状态：** ✅ 已完成
-> **事实核查日期：** 2026-07-12
+> **事实核查日期：** 2026-07-24
 > **核查范围：** 产品能力会变化；表中“官方文档”仅表示可在对应公开资料中核查，闭源内部机制仍按推导处理。每次版本更新应复核第 12 节链接和本章对比表。
 
 ---
@@ -13,7 +13,7 @@
 
 完成本章学习后，你将能够：
 
-1. 理解六大主流 Agent 框架的架构设计
+1. 理解代表性 Agent 产品、SDK 与开源项目的架构设计
 2. 对比各框架在 Runtime、Tool Registry、Memory、MCP、Hooks、Skills 等维度的设计差异
 3. 掌握框架选型的评估标准
 4. 理解各框架的设计哲学和适用场景
@@ -75,6 +75,19 @@ graph TD
 | Context 管理 | 上下文窗口管理策略 |
 
 > **来源类型：** 推导分析 —— 基于各框架官方文档和源码的架构分析。标注为「推导」的内容基于公开信息推断，可能与实际实现有差异。
+
+### 2.1 产品事实维护矩阵
+
+本章的产品事实不是永久结论。每次版本更新至少记录核查日期、官方页面或源码入口，并将结论分为四类：
+
+| 标记 | 可写入正文的内容 | 维护要求 |
+|------|------------------|----------|
+| Official Fact | 官方文档、官方公告或官方源码直接确认的能力 | 保留链接、版本/页面日期；能力消失时立即修订 |
+| Public Behavior | 可重复的公开产品行为、CLI 输出或公开 API 响应，但不等于内部机制 | 记录复现条件和 Surface；不得外推为内部实现 |
+| Inference | 由公开行为、界面或源码结构推导的架构解释 | 明确写“推导”，不得写成官方事实 |
+| Unknown | 官方未公开、版本差异过大或无法复现的内容 | 写明未知，不用相邻产品经验填空 |
+
+建议审查顺序：先检查产品定位和官方能力链接，再复现必要的 Public Behavior，随后检查对比表中的证据标签，最后运行本书示例和评估契约。产品名、模型名、价格、套餐、支持的 Transport、默认权限和工具列表都属于高变化字段，不应只依赖本章旧文字。
 
 ---
 
@@ -332,18 +345,29 @@ Continue 是开源的 AI 代码助手，以 VS Code / JetBrains 插件形式运�
 
 这些项目覆盖了第 12～16 章新增的安装型扩展、作用域、策略和 Host 生命周期，不应只在第 16 章审查中出现。这里保留可由官方文档或开源仓库确认的边界，不推断闭源内部 Planner。
 
-| 产品 / 项目 | 可核查的扩展与治理能力 | 主要架构启示 |
-|-------------|------------------------|--------------|
-| Codex | Skills、MCP、项目配置、Sandbox 与 Approval；MCP 支持 stdio 和 Streamable HTTP，并支持 Bearer/OAuth | 配置作用域、运行授权和 Sandbox 是不同层；共享 MCP 配置不表示每次调用自动获准 |
-| OpenCode | 本地/远程 MCP、OAuth、Plugin、Skills，以及 `allow / ask / deny` 权限 | 统一三态 Policy 比散落的布尔开关更易审计；大量 MCP Tool 需要按需发现和上下文预算 |
-| Hermes Agent | 渐进式 Skills、信任/扫描/隔离、多个 Plugin 来源、MCP 与命令审批 | 安装来源、供应链信任、运行权限和隔离必须分层 |
-| OpenClaw | Skills、Tool 策略与可组合扩展面 | 扩展发现不应绕过 Host 的 Tool Policy；用户控制和来源信息应进入运行治理 |
+公开能力证据表：
+
+| 产品 / 项目 | 可核查的扩展与治理能力 | 证据类型 |
+|-------------|------------------------|----------|
+| Codex | Skills、MCP、项目配置、Sandbox 与 Approval；MCP 支持 stdio 和 Streamable HTTP，并支持 Bearer/OAuth | Official Fact + Public Behavior |
+| OpenCode | 本地/远程 MCP、OAuth、Plugin、Skills，以及 `allow / ask / deny` 权限 | Official Fact |
+| Hermes Agent | 渐进式 Skills、信任/扫描/隔离、多个 Plugin 来源、MCP 与命令审批 | Official Fact + Public Behavior |
+| OpenClaw | Skills、Tool 策略与可组合扩展面 | Official Fact + Inference |
+
+架构启示表：
+
+| 产品 / 项目 | 本书可借鉴的架构启示 |
+|-------------|----------------------|
+| Codex | 配置作用域、运行授权和 Sandbox 是不同层；共享 MCP 配置不表示每次调用自动获准 |
+| OpenCode | 统一三态 Policy 比散落的布尔开关更易审计；大量 MCP Tool 需要按需发现和上下文预算 |
+| Hermes Agent | 安装来源、供应链信任、运行权限和隔离必须分层 |
+| OpenClaw | 扩展发现不应绕过 Host 的 Tool Policy；用户控制和来源信息应进入运行治理 |
 
 **官方或一手资料：** [Codex MCP](https://developers.openai.com/codex/mcp/)、[Codex Skills](https://developers.openai.com/codex/skills/)、[Codex Security](https://developers.openai.com/codex/security/)、[OpenCode MCP](https://opencode.ai/docs/mcp-servers/)、[OpenCode Permissions](https://opencode.ai/docs/permissions/)、[Hermes Agent](https://github.com/nousresearch/hermes-agent)、[OpenClaw Tools](https://github.com/openclaw/openclaw/blob/main/docs/tools/index.md)。
 
 ---
 
-## 9. 框架对比
+## 9. 框架与项目对比
 
 “易用性”和“架构完整度”无法在不同产品、团队和版本之间得到可复核的统一分数，因此本书不再使用带精确坐标的能力象限。选型应从实际控制边界开始：
 
@@ -435,8 +459,8 @@ Continue 是开源的 AI 代码助手，以 VS Code / JetBrains 插件形式运�
 
 ## 本章 Checklist
 
-- [ ] 理解六大框架的架构设计
-- [ ] 能对比各框架在 8 个维度的差异
+- [ ] 理解代表性产品、SDK 与开源项目的架构设计
+- [ ] 能对比各候选方案在 8 个维度的差异
 - [ ] 理解各框架的设计哲学和适用场景
 - [ ] 掌握框架选型的评估标准
 - [ ] 能从框架设计中提取通用架构模式

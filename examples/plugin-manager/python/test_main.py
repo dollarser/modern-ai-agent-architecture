@@ -40,5 +40,15 @@ class PluginInstallerTest(unittest.TestCase):
             with self.assertRaises(ValueError): installer.set_enabled("base", False)
             with self.assertRaises(ValueError): installer.remove("base")
 
+    def test_checksum_change_and_revoke_are_detectable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); installer = PluginInstaller(root / "installed")
+            source = self.make_plugin(root, "review")
+            installer.install(source)
+            self.assertTrue(installer.catalog.verify_integrity("review"))
+            (root / "installed" / "review" / "README.md").write_text("tampered", encoding="utf-8")
+            self.assertFalse(installer.catalog.verify_integrity("review"))
+            self.assertFalse(installer.revoke("review").enabled)
+
 
 if __name__ == "__main__": unittest.main()

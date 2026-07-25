@@ -1,5 +1,9 @@
 # 第 10 章：Hooks：生命周期事件
 
+> **维护边界：** 本章定义 Hook 的事件、顺序、错误隔离和实现契约；生产安全控制、Sandbox 与审计运维见第 17 章，最佳实践清单见第 18 章。两章不再重新定义 Hook API。
+
+对应的双语言教学实现和契约测试位于 [`examples/hooks/`](https://github.com/dollarser/modern-ai-agent-architecture/tree/main/examples/hooks)；本章代码片段用于解释事件语义，不代表生产级 Hook 平台。
+
 > **难度等级：** ⭐⭐⭐
 > **所属模块：** 第三部分：可靠运行
 > **来源可信度：** 官方文档 / 源码 / 推导 / 观点
@@ -123,11 +127,11 @@ flowchart TD
 
 ## 3. Hook 系统实现
 
-### 3.1 完整 Hook 系统
+### 3.1 Hook 教学实现
 
 ```python
 """
-Hook 系统 - 完整 Hook 实现
+Hook 系统 - 教学 Hook 实现
 运行环境：Python 3.10+
 依赖：无
 预期输出：Hook 注册、触发和 Pipeline 的演示

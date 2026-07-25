@@ -7,19 +7,19 @@
  * Usage: npm run start
  */
 
-interface ToolParameters {
+export interface ToolParameters {
   type: string;
   properties: Record<string, { type: string; description?: string }>;
   required: string[];
 }
 
-interface ToolResult {
+export interface ToolResult {
   success: boolean;
   error?: string;
   [key: string]: unknown;
 }
 
-function safeCalculate(expression: string): number {
+export function safeCalculate(expression: string): number {
   if (expression.length > 128) throw new Error("表达式过长");
   const compact = expression.replace(/\s/g, "");
   const tokens = compact.match(/\d+(?:\.\d+)?|\*\*|[()+\-*/%]/g) ?? [];
@@ -90,7 +90,7 @@ function safeCalculate(expression: string): number {
 
 type ToolHandler = (args: Record<string, unknown>) => ToolResult;
 
-interface Tool {
+export interface Tool {
   name: string;
   description: string;
   parameters: ToolParameters;
@@ -99,11 +99,46 @@ interface Tool {
   version: string;
 }
 
-class DynamicToolRegistry {
+export class ToolRegistryError extends Error {}
+
+export class DynamicToolRegistry {
   private tools: Map<string, Tool> = new Map();
 
-  register(tool: Tool): void {
+  register(tool: Tool, options: { replace?: boolean } = {}): void {
+    if (!tool.name.trim()) throw new ToolRegistryError("Tool 名称不能为空");
+    if (typeof tool.handler !== "function") throw new ToolRegistryError(`Tool '${tool.name}' 缺少可调用 Handler`);
+    this.validateSchema(tool.parameters);
+    if (this.tools.has(tool.name) && !options.replace) {
+      throw new ToolRegistryError(`Tool '${tool.name}' 已注册；显式 replace=true 才能替换`);
+    }
     this.tools.set(tool.name, tool);
+  }
+
+  private validateSchema(schema: ToolParameters): void {
+    if (schema.type !== "object" || !schema.properties || !Array.isArray(schema.required)) {
+      throw new ToolRegistryError("Tool 参数必须是 object JSON Schema");
+    }
+    if (schema.required.some((name) => !(name in schema.properties))) {
+      throw new ToolRegistryError("required 必须引用已声明的 properties");
+    }
+  }
+
+  private validateArguments(schema: ToolParameters, args: Record<string, unknown>): void {
+    if (!args || typeof args !== "object" || Array.isArray(args)) throw new ToolRegistryError("Tool 参数必须是对象");
+    const missing = schema.required.filter((name) => !(name in args));
+    if (missing.length) throw new ToolRegistryError(`缺少必填参数: ${missing.join(", ")}`);
+    const unknown = Object.keys(args).filter((name) => !(name in schema.properties));
+    if (unknown.length) throw new ToolRegistryError(`存在未声明参数: ${unknown.join(", ")}`);
+    for (const [name, value] of Object.entries(args)) {
+      const expected = schema.properties[name].type;
+      const valid = expected === "string" ? typeof value === "string"
+        : expected === "number" ? typeof value === "number" && Number.isFinite(value)
+        : expected === "boolean" ? typeof value === "boolean"
+        : expected === "object" ? typeof value === "object" && value !== null && !Array.isArray(value)
+        : expected === "array" ? Array.isArray(value)
+        : false;
+      if (!valid) throw new ToolRegistryError(`参数 '${name}' 类型错误，期望 ${expected}`);
+    }
   }
 
   unregister(name: string): boolean {
@@ -152,13 +187,17 @@ class DynamicToolRegistry {
   execute(name: string, args: Record<string, unknown>): ToolResult {
     const tool = this.get(name);
     if (!tool) {
-      return { success: false, error: `Tool '${name}' 不存在` };
+      return { success: false, error_code: "tool_not_found", error: `Tool '${name}' 不存在` };
     }
 
     try {
+      this.validateArguments(tool.parameters, args);
       return tool.handler(args);
     } catch (e) {
-      return { success: false, error: String(e) };
+      if (e instanceof ToolRegistryError) {
+        return { success: false, error_code: "invalid_arguments", error: e.message };
+      }
+      return { success: false, error_code: "handler_error", error: String(e) };
     }
   }
 }
@@ -264,4 +303,4 @@ function main(): void {
   console.log("=".repeat(60));
 }
 
-main();
+export { main };

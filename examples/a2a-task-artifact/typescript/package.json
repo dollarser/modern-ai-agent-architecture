@@ -1,0 +1,8 @@
+{
+  "name": "a2a-task-artifact-example",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": { "build": "tsc", "test": "npm run build --silent && node dist/test.js" },
+  "devDependencies": { "@types/node": "^22.0.0", "typescript": "^5.5.0" }
+}

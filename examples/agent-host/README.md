@@ -27,6 +27,7 @@
 - 通用 `AgentHost` 不包含业务 Tool；`DatabaseReviewAgent` 与 `CodingAgent` 分别显式组合审查和受限编码场景
 - `CodingAgent`：工作区内列举、读取、搜索、精确 Patch 和预注册测试；写入与执行均需审批
 - `ConversationApplication + JsonSessionStore`：一个 Session 聚合多轮 Message 和多个 Task/Run，并把裁剪后的历史传给新 Run
+- `HostA2AAdapter`：将远程 A2A Task 绑定到 Host `run_id`，发布任务事件并按租户/主体读取 Artifact；不负责远程 Transport 和认证
 - 依赖感知并行、结构化重试、Tool 超时、JSON Checkpoint 和诚实终止状态
 - Python 与 TypeScript 对等实现和契约测试
 
@@ -43,6 +44,7 @@ agent-host/
 │   ├── database_review_scenario.py # 数据库审查场景与 DatabaseReviewAgent
 │   ├── coding_scenario.py # 受限编码场景与 CodingAgent
 │   ├── installed_adapters.py # Skill/MCP/Plugin 安装面到运行面的 Adapter
+│   ├── a2a_adapter.py       # A2A Task/Artifact 到 Host 的适配层
 │   ├── main.py           # 中断恢复演示入口
 │   └── test_main.py      # 最终组装契约测试
 └── typescript/
@@ -52,6 +54,7 @@ agent-host/
     ├── database-review-scenario.ts
     ├── coding-scenario.ts
     ├── installed-adapters.ts
+    ├── a2a-adapter.ts
     ├── main.ts
     └── test.ts
 ```

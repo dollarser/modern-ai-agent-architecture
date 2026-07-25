@@ -1,5 +1,7 @@
 # 第 15 章：Agent 设计模式
 
+> **维护边界：** 本章负责模式选择与组合取舍。Planner 的机制以第 5 章为唯一正文来源，Hook 的生命周期机制以第 10 章为唯一正文来源；本章只引用并比较，不复制实现细节。
+
 > **难度等级：** ⭐⭐⭐⭐
 > **所属模块：** 第五部分：规模化与生产
 > **来源可信度：** 官方文档 / 论文 / 推导 / 观点
@@ -65,7 +67,9 @@ graph TD
 
 ReAct（Reasoning + Acting）将推理和行动交替进行，每步行动后观察结果再决定下一步。
 
-### 2.2 最小实现
+### 2.2 控制流示意（基础实现见第 5 章）
+
+这里保留模式级伪实现，用于说明选择和组合；Reasoning/Planning 的定义、预算、终止条件和可运行 Planner 以[第 5 章](../05-reasoning-planning/)为唯一正文来源。
 
 ```python
 """
@@ -126,7 +130,7 @@ class ReActLoop:
 
 先制定完整计划，再逐步执行。执行过程中可动态调整计划。
 
-### 3.2 最小实现
+### 3.2 控制流示意（基础实现见第 5 章）
 
 ```python
 class PlanAndExecute:
@@ -178,7 +182,7 @@ class PlanAndExecute:
 
 Agent 执行任务后，对自身输出进行反思和评估，如果发现问题则修正后重新执行。
 
-### 4.2 最小实现
+### 4.2 控制流示意（基础实现见第 5 章）
 
 ```python
 class ReflectionAgent:
@@ -417,6 +421,33 @@ Handoff 解决的是同一 Host 或同一应用内部的控制权转移；当协
 协议缩写并非全球唯一；这里的 ACP 特指 `agentclientprotocol/agent-client-protocol` 所定义的编辑器—Coding Agent 协议。MCP、A2A 和 ACP 解决不同连接边，均不自动提供应用内部 Policy、Sandbox 或业务授权。
 
 > **来源类型：** Fact + 推导分析 —— 参考 [A2A Protocol](https://a2aproject.github.io/A2A/latest/specification/) 与 [Agent Client Protocol](https://github.com/agentclientprotocol/agent-client-protocol) 的公开定位；具体协议版本和实现能力应以官方规范为准
+
+### 6.6 A2A 的最小任务契约
+
+A2A 不只是“把 Agent 暴露成一个 HTTP 接口”。它把跨系统协作拆成发现、任务跟踪、消息交互和结果交付四个可独立验证的部分。最小模型如下：
+
+| 对象 | 作用 | 本书中的对应边界 |
+|------|------|------------------|
+| Agent Card | 描述身份、能力、技能、端点和认证要求 | Catalog / Connector / Policy |
+| Message | 发起任务、补充信息或请求澄清 | Application / Session |
+| Task | 跨请求持续存在的工作单元 | Task / Run 的协议投影 |
+| Artifact | 任务产生的文件、结构化数据或其他交付物 | Artifact Store |
+| Status Update | 报告进度、等待输入、失败或完成 | Event Bus / Trace |
+
+跨系统调用至少应验证以下不变量：
+
+1. Agent Card 的来源、版本和认证要求在调用前可验证；
+2. 每个远程 Task 都绑定调用方、租户、权限和过期时间；
+3. `working`、`input-required`、`completed`、`failed`、`canceled` 等状态不会被直接等同为“最终成功”；
+4. 大型结果通过 Artifact 引用交付，而不是无限追加到消息历史；
+5. Streaming、Polling 和 Push Notification 只是不同的更新传输方式，不改变任务状态机；
+6. 重试和恢复使用幂等键，不能因为网络超时重复执行不可逆副作用。
+
+一个 Host 可以把本地 `Subagent` 适配为 A2A Client，也可以把自身的 `AgentHost` 暴露为 A2A Server，但两种方向都必须重新执行本地 Policy。远程 Agent 声称“支持某个 Skill”不等于本地用户已批准该能力。
+
+可运行的协议模型见 [A2A Task / Artifact 示例](https://github.com/dollarser/modern-ai-agent-architecture/tree/main/examples/a2a-task-artifact)。它使用内存传输而不依赖网络，专门测试幂等、状态与 Artifact 访问边界；真实部署仍需补充 Agent Card 发现、认证、协议版本和 HTTP/Streaming 绑定。
+
+> **来源类型：** Fact + 推导分析 —— A2A 规范将 Agent Card、Task、Message、Artifact、Streaming 和 Push Notification 作为核心模型；任务身份、租户、幂等与本地 Policy 绑定属于本书的 Host 工程约束。
 
 ---
 

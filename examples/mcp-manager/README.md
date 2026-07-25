@@ -1,6 +1,6 @@
 # MCP Server Manager
 
-第 13 章的 Host 管理层参考实现，负责 Server 配置持久化、启用/禁用、连接生命周期、Tool 刷新和敏感环境变量脱敏。`connect_enabled/connectEnabled` 将已启用 Connection 交给第 16 章 Provider Adapter；Connection 同时保留 Tool 发现和调用接口，避免只能列出 Tool 却无法进入 Runtime。Fake Transport 使所有测试离线运行。
+第 13 章的 Host 管理层参考实现，负责 Server 配置持久化、启用/禁用、连接生命周期、Tool 刷新和敏感环境变量脱敏。`connect_enabled/connectEnabled` 将已启用 Connection 交给第 16 章 Provider Adapter；Connection 同时保留 Tool 发现和调用接口，避免只能列出 Tool 却无法进入 Runtime。Fake Transport 使所有测试离线运行；它是 Manager Port 的契约测试，不是当前 MCP 传输兼容性测试。
 
 ```bash
 cd python

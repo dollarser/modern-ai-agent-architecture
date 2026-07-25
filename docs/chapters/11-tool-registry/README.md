@@ -14,7 +14,7 @@
 1. 理解 Tool Registry 在 Agent 架构中的核心地位
 2. 掌握 Tool 的注册、发现、路由和调度机制
 3. 理解 Tool Router 的匹配算法
-4. 实现一个完整的 Tool Registry
+4. 实现一个可运行的 Tool Registry 教学切片，并理解生产治理边界
 5. 理解 Tool 的动态注册和热更新
 
 ---
@@ -96,11 +96,17 @@ graph TD
 
 **How：** 本章示例实现 Registry 与一个基础 Router，重点是可查找、可禁用和可度量的 Tool 元数据。生产环境还应把授权判断放在每次执行路径上，并以第 17 章的 Guardrails、审批和审计机制兜底。
 
+仓库中的 `examples/tool-registry/` 是本章的最小教学切片：它额外验证重复注册保护、JSON Schema 必填/类型/未知参数校验、结构化错误和安全计算器边界。它仍然不实现 Policy、Approval、Sandbox、超时或审计；这些职责由第 9、16、17 章的 Runtime 与 Agent Host 承担。
+
+Tool Registry 的 `tool_not_found`、`invalid_arguments` 和 `handler_error` 应映射到[统一 Agent 错误契约](../../references/Error-Contract.md)，不要让调用方依赖不同 Handler 的异常文本。
+
 ---
 
 ## 2. Tool Registry 实现
 
-### 2.1 完整 Tool Registry
+### 2.1 Tool Registry 教学实现
+
+测试入口：`python -m unittest discover -s examples/tool-registry/python -p 'test_*.py' -v`、`npm --prefix examples/tool-registry/typescript test`。正文只解释 Registry 契约，Policy、Approval、Sandbox 和审计仍由第 9、16、17 章负责。
 
 ```python
 """

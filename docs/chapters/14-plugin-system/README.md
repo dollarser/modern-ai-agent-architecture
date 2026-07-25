@@ -1,5 +1,7 @@
 # 第 14 章：Plugin 体系
 
+> **维护边界：** 本章是 Plugin Manifest、依赖、权限、来源和安装回滚的唯一正文来源；Host 组装见第 16 章，生产供应链控制见第 17 章，最佳实践只保留检查项。
+
 > **难度等级：** ⭐⭐⭐
 > **所属模块：** 第四部分：扩展与互操作
 > **来源可信度：** 官方文档 / 源码 / 推导 / 观点
@@ -80,20 +82,33 @@ graph TD
 
 ### 2.2 Plugin 生命周期
 
-```mermaid
-stateDiagram-v2
-    [*] --> Registered: 注册
-    Registered --> Loaded: 加载
-    Loaded --> Active: 激活
-    Active --> Disabled: 禁用
-    Disabled --> Loaded: 重新加载
-    Active --> Registered: 卸载
-    Disabled --> Registered: 卸载
-    Active --> Error: 出错
-    Error --> Registered: 重置
+Plugin 也遵循全书统一生命周期：
+
+```text
+发现 → 验证 → 安装 → 启用 → 加载 → 授权 → 执行 → 卸载
 ```
 
-> **图 14-2：** Plugin 生命周期状态机。从注册到加载、激活、禁用、卸载的完整生命周期。
+本章状态机只展开“加载/激活/禁用/卸载”部分；发现、校验和原子安装由 Installer 负责，授权和执行仍回到 Host Policy、Approval、Sandbox 与 Tool Registry。
+
+```mermaid
+stateDiagram-v2
+    [*] --> Discovered: 发现
+    Discovered --> Verified: 验证
+    Verified --> Installed: 安装
+    Installed --> Enabled: 启用
+    Enabled --> Loaded: 加载
+    Loaded --> Authorized: 本次运行授权
+    Authorized --> Executing: 执行贡献项
+    Executing --> Loaded: 本次调用结束
+    Loaded --> Enabled: 运行结束
+    Enabled --> Unloaded: 卸载
+    Enabled --> Revoked: 禁用/撤销
+    Loaded --> Revoked: 运行中撤销
+    Revoked --> [*]
+    Unloaded --> [*]
+```
+
+> **图 14-2：** Plugin 统一生命周期教学子图。它展开从发现、验证到卸载/撤销的状态变化，不表示已覆盖生产供应链和运行隔离。
 
 ### 2.3 可选能力与打包边界
 
@@ -416,7 +431,7 @@ python main.py --root .agent/plugins disable my-plugin
 python main.py --root .agent/plugins remove my-plugin
 ```
 
-完整 Python/TypeScript 实现位于 `examples/plugin-manager/`。它只支持可信本地目录；远程下载、签名验证、发布者信任、版本范围求解和进程沙箱属于生产扩展。
+Python/TypeScript 教学实现和契约测试位于 `examples/plugin-manager/`。它只支持可信本地目录；远程下载、签名验证、发布者信任、版本范围求解和进程沙箱属于生产扩展。
 
 ---
 

@@ -1,5 +1,7 @@
 # 第 18 章：最佳实践、评估与反模式
 
+> **维护边界：** 本章汇总决策清单、评估契约和反模式，不复制第 5、10、12--17 章的组件实现；若发现定义冲突，应回到对应组件章节修正，再在此处保留链接和检查项。
+
 > **难度等级：** ⭐⭐⭐
 > **所属模块：** 第五部分：规模化与生产
 > **来源可信度：** 官方文档 / 源码 / 推导 / 观点
@@ -68,6 +70,8 @@
 
 ### 1.5 Hooks
 
+本节只保留实践清单：Hook 的事件、顺序和失败模式以第 10 章为准；Guardrail、Policy、Approval 和 Sandbox 的生产控制链以第 17 章图 17-2 为准。
+
 | 实践 | 说明 | 参考章节 |
 |------|------|---------|
 | 只做横切关注点 | 日志、监控、权限、脱敏，不包含业务逻辑 | 第 10 章 |
@@ -77,10 +81,12 @@
 
 ### 1.6 安装型扩展
 
+本节只保留检查项；Skill、MCP、Plugin 的生命周期状态和安装语义分别以第 12～14 章为准。
+
 | 实践 | 说明 | 参考章节 |
 |------|------|---------|
 | 安装不等于授权 | Manifest 是权限请求，Host 和 Tool 调用边界仍须授权 | 第 12--14、16 章 |
-| 来源可追踪 | 记录来源、版本和校验和，更新采用原子替换并支持回滚 | 第 12、17 章 |
+| 来源可追踪 | 记录来源、版本和校验和；安装后复核完整性，更新采用原子替换，撤销后新 Run 不再加载 | 第 12、14、17 章 |
 | 凭据不泄漏 | MCP 环境变量保存受控引用，列表、日志和 Trace 必须脱敏 | 第 13、17 章 |
 | 生命周期对称 | 启用、禁用、删除和关闭同步处理连接与 Registry 资源 | 第 13、16 章 |
 | 供应链隔离 | Skill、MCP 子进程和 Plugin 使用签名、Allowlist、沙箱和审计 | 第 12--14、17 章 |
@@ -387,6 +393,51 @@ class MockLLMProvider:
 ### 6.6 LLM-as-Judge 的校准
 
 LLM 评审适合扩展开放性任务的覆盖面，不应成为唯一真值。先由领域人员为一小批样本给出清晰 rubric 和盲评结果，再比较评审模型与人工的一致性；对分歧大、涉及安全或高价值决策的样本保留人工复核。评审提示、模型版本和评分阈值也是被测系统的一部分，必须随评估集版本化。
+
+### 6.7 Trace 到评估结果的映射
+
+评估报告中的失败分类也应使用[统一 Agent 错误契约](../../references/Error-Contract.md)，否则不同示例的 `failed` 无法比较。
+
+评估系统不应只保存一个最终分数。建议把一次评估样本关联到完整 Trace，并区分三类断言：
+
+| 层次 | 典型字段 | 适合的断言 |
+|------|----------|------------|
+| 任务层 | `task_id`、数据集版本、用户权限、期望交付 | 是否完成目标、是否满足业务规则 |
+| 轨迹层 | Model、Tool、Handoff、Guardrail、Approval、Retry | 是否访问了允许的数据、是否绕过策略、是否超预算 |
+| 产物层 | Artifact 类型、校验和、来源、引用 | 文件是否可读取、结果是否可验证、引用是否对应来源 |
+
+推荐为每个评估样本记录以下版本信息：`agent_version`、`prompt_version`、`policy_version`、`tool_catalog_version`、`model`、`dataset_version` 和 `evaluator_version`。这样才能区分“模型变好了”和“测试数据、Tool 或评分器变了”。
+
+一个最小的评估契约可以写成版本化 JSON：
+
+```json
+{
+  "case_id": "orders-readonly-001",
+  "dataset_version": "orders-v3",
+  "task": "只读查询本周订单",
+  "allowed_tools": ["orders.search"],
+  "forbidden_tools": ["orders.update"],
+  "assertions": {
+    "terminal_status": "completed",
+    "tenant_isolation": true,
+    "max_tool_calls": 3,
+    "approval_bypass": false
+  },
+  "versions": {
+    "agent": "2026.07.24",
+    "policy": "readonly-v2",
+    "evaluator": "rubric-v1"
+  }
+}
+```
+
+测试执行器应同时读取最终结果和 Trace：前者判断任务交付，后者判断 Tool、权限、预算和恢复不变量。这样可以把“答案碰巧正确但越权访问了数据”判定为失败。
+
+可运行的双语言执行器位于 [`examples/evaluation-contract/`](https://github.com/dollarser/modern-ai-agent-architecture/tree/main/examples/evaluation-contract)，当前使用确定性轨迹演示硬断言；真实项目可以把 Trace 来源替换为 Agent Host、OpenTelemetry 或框架 SDK。
+
+如果使用 OpenTelemetry 或其他 Trace 系统，建议采用统一的 Agent/Model/Tool/Artifact 字段映射，但不要默认采集完整 Prompt、Tool 参数和结果。它们可能包含个人数据、凭据或业务机密，应采用字段级脱敏、采样、访问控制和保留期策略。Trace 的兼容性是观测层问题，不能替代本书定义的 `Task / Run / Session / Checkpoint` 身份模型。
+
+> **来源类型：** Fact + 推导分析 —— OpenTelemetry GenAI 语义约定已覆盖 `invoke_agent`、`execute_tool`、会话标识、Tool Call 和 Token Usage；评估数据集、版本绑定和脱敏策略属于本书的工程建议。
 
 ---
 

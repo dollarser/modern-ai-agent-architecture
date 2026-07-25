@@ -13,6 +13,18 @@ export interface InstalledSkill {
 
 const validName = /^[a-z0-9][a-z0-9-]{0,63}$/
 
+async function checksumTree(root: string): Promise<string> {
+  const digest = createHash("sha256")
+  const walk = async (directory: string): Promise<void> => {
+    for (const entry of (await readdir(directory, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
+      if (entry.name === ".installed.json" || entry.name === ".installed.json.tmp") continue
+      const full = path.join(directory, entry.name)
+      if (entry.isDirectory()) await walk(full); else { digest.update(path.relative(root, full)); digest.update(await readFile(full)) }
+    }
+  }
+  await walk(root); return digest.digest("hex")
+}
+
 async function manifestAt(directory: string): Promise<SkillManifest> {
   const value = JSON.parse(await readFile(path.join(directory, "skill.json"), "utf8")) as SkillManifest
   if (!value.name || !value.version || !value.description) throw new Error("skill.json 缺少必填字段")
@@ -36,6 +48,9 @@ export class SkillCatalog {
     const instructions = await readFile(path.join(directory, "SKILL.md"), "utf8")
     const metadata = JSON.parse(await readFile(path.join(directory, ".installed.json"), "utf8"))
     return { manifest, instructions, path: directory, source: metadata.source, checksum: metadata.checksum }
+  }
+  async verifyIntegrity(name: string): Promise<boolean> {
+    const item = await this.get(name); return (await checksumTree(item.path)) === item.checksum
   }
   async match(task: string): Promise<InstalledSkill[]> {
     const lowered = task.toLowerCase()
@@ -88,14 +103,6 @@ export class SkillInstaller {
     await rm(target, { recursive: true })
   }
   private async checksum(root: string): Promise<string> {
-    const digest = createHash("sha256")
-    const walk = async (directory: string): Promise<void> => {
-      for (const entry of (await readdir(directory, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
-        const full = path.join(directory, entry.name)
-        if (entry.isDirectory()) await walk(full)
-        else { digest.update(path.relative(root, full)); digest.update(await readFile(full)) }
-      }
-    }
-    await walk(root); return digest.digest("hex")
+    return checksumTree(root)
   }
 }
