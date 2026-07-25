@@ -38,6 +38,10 @@ jobs:
         shell: bash
         run: |
           for example_dir in examples/*/typescript/; do
+            if [ ! -f "$example_dir/package.json" ]; then
+              echo "Skipping $example_dir (no package.json)"
+              continue
+            fi
             echo "=== Testing $example_dir ==="
             npm --prefix "$example_dir" ci
             npm --prefix "$example_dir" run build
@@ -48,6 +52,9 @@ jobs:
         shell: bash
         run: |
           for example_dir in examples/*/typescript/; do
+            if [ ! -f "$example_dir/package.json" ]; then
+              continue
+            fi
             if [ ! -f "$example_dir/package-lock.json" ]; then
               echo "ERROR: $example_dir is missing package-lock.json"
               exit 1
