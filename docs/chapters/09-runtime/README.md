@@ -73,6 +73,8 @@ graph TD
 
 ### 1.4 运行身份与恢复不变量
 
+Runtime 对外返回的失败应遵循[统一 Agent 错误契约](../../references/Error-Contract.md)：错误码、消息、可重试性和详情分开记录。不要把超时、取消、审批拒绝、能力不匹配和下游副作用未知都压缩成同一个字符串异常。
+
 Application 与 Runtime 的边界至少应分别保存或关联 `task_id`、`run_id`、`session_id`、`trace_id` 和当前 `checkpoint_revision`：Session/Task 通常由应用层拥有，Run/Checkpoint 由 Runtime 拥有，Trace 贯穿两层。对整个 Task 发起新的执行尝试时创建新的 `run_id`；同一 Run 内针对幂等 Tool 的有限瞬时重试仍属于原 Run；从 Checkpoint 恢复未完成执行也沿用原 `run_id` 并递增 revision。子代理创建 `child_run_id` 并记录 `parent_run_id`。任何写操作使用单独的 `idempotency_key`，不能用 Session 或 Run ID 粗暴替代，因为同一次 Run 可能合法地对同一 Tool 执行多次不同写入。
 
 恢复前必须比较任务版本、能力快照、Policy、Profile 和输入 Artifact 的兼容性。Replay 默认只读；若要重放副作用，必须显式进入重新执行流程并重新授权。
@@ -81,7 +83,7 @@ Application 与 Runtime 的边界至少应分别保存或关联 `task_id`、`run
 
 ## 2. Runtime 实现
 
-### 2.1 完整 Runtime
+### 2.1 Runtime 教学实现
 
 ```python
 """

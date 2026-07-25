@@ -1,11 +1,13 @@
 {
   "name": "memory",
   "version": "1.0.0",
+  "type": "module",
   "description": "memory - TypeScript example",
   "main": "dist/main.js",
   "scripts": {
     "start": "tsx main.ts",
-    "build": "tsc"
+    "build": "tsc",
+    "test": "npm run build --silent && node dist/test-contracts.js"
   },
   "devDependencies": {
     "typescript": "^5.5.0",

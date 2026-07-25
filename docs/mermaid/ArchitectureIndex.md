@@ -31,10 +31,10 @@ Application / Agent Host → Agent / Subagent → Runtime / Policy → Tool Hand
 ### 扩展安装与执行边界
 
 ```text
-Package → Catalog → Host → Agent → Runtime / Policy → Tool → Adapter
+发现 → 验证 → 安装 → 启用 → 加载 → 授权 → 执行 → 卸载/撤销
 ```
 
-详见：[图 2-7：扩展从安装到执行](../chapters/02-architecture/README.md)
+详见：[图 2-7：扩展从发现到执行/卸载的教学治理边界](../chapters/02-architecture/README.md)
 
 ### 运行身份与恢复对象
 
@@ -92,13 +92,13 @@ Load → Read → Reasoning → Planning → Execute → Observe → Finish
 
 | 流程 | 图表 | 章节 |
 |------|------|------|
-| Function Calling | [图 6-1] Function Calling 时序图 | 第 6 章 |
+| Function Calling | [图 6-1] Function Calling 最小教学时序图 | 第 6 章 |
 | Tool 调用决策 | [图 6-3] Tool 调用决策树 | 第 6 章 |
 | ReAct 循环 | [图 5-2] ReAct 循环 | 第 5 章 |
 | Plan-and-Execute | [图 5-3] Plan-and-Execute 流程 | 第 5 章 |
 | Context 管理 | [图 4-2] Context Window 管理策略 | 第 4 章 |
 | Run 恢复与回放 | [图 16-5：Run 状态与读取语义](../chapters/16-agent-host/README.md) | 第 16 章 |
-| 安全控制链 | [图 17-2：Policy、Approval、Guardrail、Hook 与 Sandbox](../chapters/17-engineering-practice/README.md) | 第 17 章 |
+| 安全控制链 | [图 17-2：生产安全控制唯一职责链](../chapters/17-engineering-practice/README.md) | 第 17 章 |
 
 ---
 

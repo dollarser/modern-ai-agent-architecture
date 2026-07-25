@@ -13,8 +13,8 @@
 
 - 保持现有 20 章框架，允许为准确性和去重调整章节数量。
 - Mermaid 图不设增长性下限，当前基线为 54 张；新增、删除或合并均以信息价值和索引一致为准。
-- 当前维护 15 个独立示例工程、Python/TypeScript 共 30 个入口；第 7 章是只读 MVP，`coding-agent-mvp` 是组合预览，第 16 章 `CodingAgent` 才是受控编码纵向切片。
-- 当前测试基线为 Python 7 个工程 39 项测试，以及 15 个 TypeScript 工程全部构建、所有已声明契约测试通过。
+- 当前维护 18 个独立示例工程、Python/TypeScript 共 36 个入口；第 7 章是只读 MVP，`coding-agent-mvp` 是组合预览，第 16 章 `CodingAgent` 才是受控编码纵向切片；A2A Task/Artifact、评估契约和模型能力契约示例覆盖异步任务、结果交付、轨迹断言与能力降级。
+- 当前测试基线为 Python 12 个工程 55 项测试，以及 18 个 TypeScript 工程全部构建、11 个工程的契约测试通过。
 - 已识别 P0/P1 必须清零；P2 必须修复或在终审报告记录明确取舍，不能只因时间不足降级忽略。
 - Glossary、FAQ、References 和 CodeExamples 索引均存在且可追溯。
 - 框架分析覆盖至少 6 个代表性方案，并注明证据边界。

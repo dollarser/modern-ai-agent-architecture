@@ -226,7 +226,7 @@ class CheckpointStore(Protocol):
 
 Checkpoint 同时保存 `CapabilitySnapshot`：Tool 名称/Schema/来源、Skill 内容校验和、Policy 版本和关键配置共同生成 `snapshot_hash`。恢复前必须比较当前能力快照；不兼容时返回 `failed/capability_snapshot_mismatch`，而不是让旧计划调用已经改变语义的 Tool。审批 ID 也绑定该 Hash，旧能力上的审批不能自动授权新版本能力。
 
-### 3.3 完整生命周期 Hook Pipeline
+### 3.3 生命周期 Hook Pipeline 教学实现
 
 本章统一了以下事件：
 
@@ -556,6 +556,41 @@ TaskRecord(task_id, run_id, request, status)
 `ConversationApplication.send()` 先加载 Session，截取最近若干条历史，再为当前用户消息创建全新的 `task_id/run_id`。用户意图和执行身份必须在 Runtime 调用前落盘；Run 完成后，Application 再写入 Assistant Message 和 Task 终态。历史以显式 `conversation_context` 传给 AgentHost 的 Planner，它不会改变 Run 的恢复身份，也不会把整个 Session 无上限复制进 Context。
 
 教学 `JsonSessionStore` 使用原子替换并在进程内串行化发送，但它不提供多进程事务、租户隔离或分布式锁。生产实现应为 `session_id + message_id`、`task_id` 和 `run_id` 分别设置唯一约束和幂等键，并定义并发消息的排序策略。
+
+### 7.6 异步 Task 与 Artifact 交付
+
+当 Tool 或 Subagent 可能运行数分钟甚至数小时，HTTP 请求的返回值不能继续承担完整的执行协议。Host 应把“已接受任务”“正在执行”“等待用户”“已产生结果”和“最终完成”分开建模：
+
+```text
+submitted → running → waiting_for_input / waiting_for_approval
+          → waiting_for_tool → completed / failed / cancelled / expired
+```
+
+每个状态事件至少包含 `task_id`、`run_id`、事件序号、时间戳和可追踪的原因。`accepted` 只能表示 Runtime 已接管任务，不能表示 Tool 或下游系统已经完成工作。取消也不能自动声称外部副作用已经撤销；最终状态必须由下游确认或进入明确的 `cancel_requested` / `unknown` 语义。
+
+大型输出应进入 Artifact Store，Context 和事件只保存摘要、引用、媒体类型、大小、校验和、来源以及访问策略。一个最小 Artifact 记录可以是：
+
+```python
+from dataclasses import dataclass
+
+@dataclass(frozen=True)
+class ArtifactRef:
+    artifact_id: str
+    run_id: str
+    media_type: str
+    uri: str
+    checksum: str
+    size: int
+    expires_at: str | None = None
+```
+
+Artifact 的读取也必须经过租户、主体、Run 和保留期检查。不要把可下载的永久 URL 直接写入 Prompt、Trace 或最终回答；生产实现应使用短期授权引用，并记录谁在何时读取了 Artifact。
+
+> **来源类型：** Fact + 推导分析 —— A2A 将 Task、Status Update 与 Artifact 分离；MCP v2025-11-25 也提供了面向延迟结果的实验性 Tasks。这里的状态、幂等和访问控制是不依赖具体协议的 Host 契约。
+
+对应的最小双语言契约测试位于 [A2A Task / Artifact 示例](https://github.com/dollarser/modern-ai-agent-architecture/tree/main/examples/a2a-task-artifact)。示例只实现协议模型和内存 Artifact Store，刻意不把内存实现描述成生产级持久化或远程传输。
+
+Agent Host 还提供 [HostA2AAdapter](https://github.com/dollarser/modern-ai-agent-architecture/tree/main/examples/agent-host)，把远程 Task 的提交、状态观察和 Artifact 读取绑定到 `run_id`。远程 Transport、认证和持久化由注入的 Client/Store 负责，适配层不会绕过 Host 的身份与恢复边界。
 
 ---
 

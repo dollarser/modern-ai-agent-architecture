@@ -1,0 +1,10 @@
+{
+  "case_id": "orders-readonly-001",
+  "dataset_version": "orders-v3",
+  "task": "只读查询本周订单",
+  "allowed_tools": ["orders.search"],
+  "forbidden_tools": ["orders.update"],
+  "expected_status": "completed",
+  "max_tool_calls": 2,
+  "versions": {"agent": "2026.07.24", "policy": "readonly-v2", "evaluator": "rubric-v1"}
+}

@@ -12,8 +12,12 @@ async function makePlugin(root: string, name: string, extra: object = {}): Promi
 }
 const root = await mkdtemp(path.join(os.tmpdir(), "plugin-manager-")); const installer = new PluginInstaller(path.join(root, "installed"))
 const review = await makePlugin(root, "review"); assert.equal((await installer.install(review)).enabled, true)
+assert.equal(await installer.catalog.verifyIntegrity("review"), true)
 assert.equal((await installer.setEnabled("review", false)).enabled, false)
 await writeFile(path.join(review, "README.md"), "updated"); assert.equal((await installer.install(review, true)).enabled, false)
+await writeFile(path.join(root, "installed", "review", "README.md"), "tampered")
+assert.equal(await installer.catalog.verifyIntegrity("review"), false)
+assert.equal((await installer.revoke("review")).enabled, false)
 const protectedPlugin = await makePlugin(root, "protected", { permissions: ["shell"] }); await assert.rejects(installer.install(protectedPlugin))
 const future = await makePlugin(root, "future", { min_agent_version: "2.0.0" }); await assert.rejects(installer.install(future))
 const dependent = await makePlugin(root, "dependent", { dependencies: ["review"] }); await installer.install(dependent)

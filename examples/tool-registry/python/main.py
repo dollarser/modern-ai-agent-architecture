@@ -67,14 +67,33 @@ class Tool:
     version: str = "1.0.0"
 
 
+class ToolRegistryError(ValueError):
+    """注册契约错误；生产系统应由上层映射为结构化 API 错误。"""
+
+
 class DynamicToolRegistry:
     """动态 Tool 注册中心"""
 
     def __init__(self):
         self._tools: dict[str, Tool] = {}
 
-    def register(self, tool: Tool) -> None:
+    def register(self, tool: Tool, *, replace: bool = False) -> None:
+        if not tool.name.strip():
+            raise ToolRegistryError("Tool 名称不能为空")
+        if not callable(tool.handler):
+            raise ToolRegistryError(f"Tool '{tool.name}' 缺少可调用 Handler")
+        self._validate_schema(tool.parameters)
+        if tool.name in self._tools and not replace:
+            raise ToolRegistryError(f"Tool '{tool.name}' 已注册；显式 replace=True 才能替换")
         self._tools[tool.name] = tool
+
+    @staticmethod
+    def _validate_schema(schema: dict) -> None:
+        if schema.get("type") != "object" or not isinstance(schema.get("properties"), dict):
+            raise ToolRegistryError("Tool 参数必须是 object JSON Schema")
+        required = schema.get("required", [])
+        if not isinstance(required, list) or any(name not in schema["properties"] for name in required):
+            raise ToolRegistryError("required 必须引用已声明的 properties")
 
     def unregister(self, name: str) -> bool:
         if name in self._tools:
@@ -120,12 +139,41 @@ class DynamicToolRegistry:
     def execute(self, name: str, arguments: dict) -> dict:
         tool = self.get(name)
         if not tool:
-            return {"success": False, "error": f"Tool '{name}' 不存在"}
+            return {"success": False, "error_code": "tool_not_found", "error": f"Tool '{name}' 不存在"}
 
         try:
+            self._validate_arguments(tool.parameters, arguments)
             return tool.handler(**arguments)
+        except ToolRegistryError as e:
+            return {"success": False, "error_code": "invalid_arguments", "error": str(e)}
+        except TypeError as e:
+            return {"success": False, "error_code": "invalid_arguments", "error": str(e)}
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            return {"success": False, "error_code": "handler_error", "error": str(e)}
+
+    @staticmethod
+    def _validate_arguments(schema: dict, arguments: dict) -> None:
+        if not isinstance(arguments, dict):
+            raise ToolRegistryError("Tool 参数必须是对象")
+        properties = schema["properties"]
+        missing = [name for name in schema.get("required", []) if name not in arguments]
+        if missing:
+            raise ToolRegistryError(f"缺少必填参数: {', '.join(missing)}")
+        unknown = [name for name in arguments if name not in properties]
+        if unknown:
+            raise ToolRegistryError(f"存在未声明参数: {', '.join(unknown)}")
+        for name, value in arguments.items():
+            expected = properties[name].get("type")
+            valid = {
+                "string": isinstance(value, str),
+                "number": isinstance(value, (int, float)) and not isinstance(value, bool),
+                "integer": isinstance(value, int) and not isinstance(value, bool),
+                "boolean": isinstance(value, bool),
+                "object": isinstance(value, dict),
+                "array": isinstance(value, list),
+            }.get(expected, False)
+            if not valid:
+                raise ToolRegistryError(f"参数 '{name}' 类型错误，期望 {expected}")
 
 
 def main():
@@ -181,6 +229,7 @@ def main():
     print(f"\n  搜索 '搜索': {[t.name for t in results]}")
 
     print(f"  安全计算: {registry.execute('calculate', {'expr': '(2 + 3) * 4'})}")
+    # Python 3.10/3.11 不允许 f-string 表达式包含反斜杠，因此先单独求值。
     rejected_expression = '__import__("os")'
     rejected_result = registry.execute("calculate", {"expr": rejected_expression})
     print(f"  拒绝代码: {rejected_result}")

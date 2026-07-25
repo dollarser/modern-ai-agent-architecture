@@ -14,7 +14,7 @@
 1. 理解 Tool 的抽象层次和设计原则
 2. 掌握 Function Calling 的请求/响应格式和工作流程
 3. 理解 Built-in Tool 和 MCP Tool 的区别和适用场景
-4. 实现一个完整的 Tool 调用流程
+4. 实现一个可运行的 Tool 调用教学流程，并理解生产执行边界
 5. 理解 Tool 的选择、调度和错误处理策略
 
 ---
@@ -94,7 +94,7 @@ sequenceDiagram
     Agent->>User: 返回结果
 ```
 
-> **图 6-1：** Function Calling 完整时序图。Agent 将 Tool 定义发送给 LLM，LLM 返回 Function Call，Agent 执行 Tool 后将结果反馈给 LLM 生成最终回复。
+> **图 6-1：** Function Calling 最小教学时序图。Agent 将 Tool 定义发送给 LLM，LLM 返回 Function Call，Host 在治理边界内执行 Tool，再将结果反馈给 LLM 生成最终回复。
 
 ### 2.3 Tool 抽象层次
 
@@ -347,7 +347,7 @@ final_messages = request_messages + [response, tool_result]
 
 > **来源类型：** Fact —— 基于 OpenAI Chat Completions API 文档
 
-### 4.2 完整 Function Calling 实现
+### 4.2 Function Calling 教学实现
 
 ```python
 """
@@ -355,8 +355,8 @@ Function Calling 教学实现
 运行环境：Python 3.10+
 依赖：openai>=1.0.0
 注意：本节代码引用前文定义的 Tool 类和 FunctionCall 等结构，
-完整可运行版本见 examples/tool-calling/
-预期输出：完整的 Function Calling 流程演示
+可运行教学版本见 `examples/tool-calling/`；它演示 Function Calling 流程，不覆盖生产级 Provider、Policy、Approval、Sandbox 或审计。
+预期输出：Function Calling 教学流程演示
 """
 
 import json

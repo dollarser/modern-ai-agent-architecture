@@ -28,7 +28,7 @@ uv pip install -r requirements-docs.txt
 
 ## 示例代码
 
-仓库包含 15 个独立示例工程、Python/TypeScript 共 30 个入口。除概念示例外，还包括 Skill Installer、MCP Server Manager、Plugin Manager、Application Session 和受限 Coding Agent。依赖和运行方式见各示例目录中的 `README.md`。
+仓库包含 18 个独立示例工程、Python/TypeScript 共 36 个入口。除概念示例外，还包括 A2A Task/Artifact、评估契约、模型能力契约、Skill Installer、MCP Server Manager、Plugin Manager、Application Session 和受限 Coding Agent。依赖和运行方式见各示例目录中的 `README.md`。
 
 ```bash
 # Python
@@ -53,7 +53,7 @@ npm run check:mermaid
 ```text
 .
 ├── docs/          # MkDocs 书稿、20 章正文与附录
-├── examples/      # 15 个独立 Python/TypeScript 教学工程
+├── examples/      # 18 个独立 Python/TypeScript 教学工程
 ├── specs/         # 现行书籍规范、共创方法与历史需求归档
 ├── reviews/       # 审查报告、出版基线和维护记录
 ├── scripts/       # 链接与 Mermaid 校验脚本

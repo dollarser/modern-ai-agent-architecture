@@ -31,12 +31,23 @@ import {
 import { CodingAgent, Workspace } from "./coding-scenario.js"
 import { ConversationApplication, JsonSessionStore } from "./application.js"
 import { CatalogPluginProvider, CatalogSkillProvider, ManagerMCPProvider } from "./installed-adapters.js"
+import { HostA2AAdapter, type RemoteTaskRequest } from "./a2a-adapter.js"
+import { SandboxProfile } from "./sandbox-profile.js"
 
 const withCheckpoint = async (test: (path: string) => Promise<void>): Promise<void> => {
   const directory = mkdtempSync(join(tmpdir(), "agent-host-test-"))
   try { await test(join(directory, "cp.json")) }
   finally { rmSync(directory, { recursive: true, force: true }) }
 }
+
+await withCheckpoint(async (checkpoint) => {
+  const profile = new SandboxProfile({ workspaceRoots: ["/workspace"], processAllowlist: ["python"], networkAllowlist: ["pypi.org"], secretNames: ["API_TOKEN"], maxRuntimeSeconds: 10 })
+  profile.validate()
+  assert.equal(profile.allowsProcess("/usr/bin/python"), true)
+  assert.equal(profile.allowsProcess("bash"), false)
+  assert.equal(profile.allowsNetwork("example.com"), false)
+  assert.equal(profile.mayLogSecret("API_TOKEN"), false)
+})
 
 await withCheckpoint(async (checkpoint) => {
   const host = new AgentHost(checkpoint)
@@ -586,6 +597,27 @@ await withCheckpoint(async (checkpoint) => {
   assert.equal(agent.tools.contains("managed.lookup"), true)
   await agent.closeExtensions()
   assert.equal(closed, true)
+})
+
+await withCheckpoint(async (checkpoint) => {
+  const host = new AgentHost(checkpoint)
+  const client = {
+    submit: async (request: RemoteTaskRequest) => ({ success: true, status: "submitted", taskId: request.taskId }),
+    getTask: async (taskId: string, tenantId: string, owner: string) => ({ success: true, taskId, tenantId, owner, status: "working" }),
+    getArtifact: async (artifactId: string, tenantId: string, owner: string) => Buffer.from(`${tenantId}:${owner}:${artifactId}`),
+  }
+  const adapter = new HostA2AAdapter(host, client)
+  const request: RemoteTaskRequest = {
+    runId: "run-1", taskId: "task-1", tenantId: "tenant-a", owner: "alice",
+    idempotencyKey: "idem-1", message: "生成报告",
+  }
+  const result = await adapter.submit(request)
+  assert.equal(result.success, true)
+  assert.equal((host.events as EventBus).events.at(-1)?.topic, "a2a.task.submitted")
+  assert.equal((await adapter.getTask("run-1", "task-1", "tenant-a", "alice")).status, "working")
+  assert.equal((await adapter.getArtifact("run-1", "artifact-1", "tenant-a", "alice")).toString(), "tenant-a:alice:artifact-1")
+  const mismatch = await adapter.submit({ ...request, taskId: "task-2", idempotencyKey: "idem-2" })
+  assert.equal(mismatch.error_code, "checkpoint_mismatch")
 })
 
 console.log("agent-host TypeScript tests: OK")

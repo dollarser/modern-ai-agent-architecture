@@ -4,7 +4,10 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/) 规范。
 
-## [Unreleased] - 2026-07-11
+## [Unreleased] - 2026-07-24
+
+- 根据 2026 年 Agent 工程趋势复核全书：统一 MCP v2025-11-25 事实基线，补充 A2A 最小任务契约、异步 Task 与 Artifact 交付、扩展供应链治理，以及 Trace 到评估结果的映射。
+- 修正第 19 章框架数量表述和 Mermaid 索引，补充 A2A 与 OpenTelemetry GenAI 参考文献。
 
 ### 最终版定位
 - 冻结最终学习成果：兼顾 AI Agent 概念、理论与开发，并以可对话、可安装扩展、可完成简单编码任务的教学型 Agent Host 为落点。

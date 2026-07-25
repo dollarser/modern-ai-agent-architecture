@@ -163,6 +163,25 @@ graph TD
 
 > **来源类型：** 推导分析 —— 基于第 4、6、12、18、19 章的上下文、Tool、运行时、成本和评估要求
 
+#### 2.5.1 Model Capability Contract
+
+模型迁移不能简化为替换模型名称。Host 应在启动或运行前记录模型能力快照，并在使用相应功能前验证能力：
+
+| 能力 | 影响的 Host 契约 | 缺失时的降级 |
+|------|------------------|--------------|
+| Tool Calling | Tool Schema、调用 ID、并行调用 | 禁用 Tool 或转人工 |
+| Structured Output | 输出 Schema、校验和重试 | 使用文本解析并降低可信度 |
+| Streaming | 增量事件、取消和 UI 展示 | 等待完整响应 |
+| Vision / Audio | 多模态 Observation 与 Artifact | 要求用户提供文本或文件引用 |
+| Reasoning | 预算、隐藏推理项和结果转换 | 只依赖结构化计划与验证 |
+| Prompt Caching | 成本归属、缓存失效和隐私 | 关闭缓存或按权限隔离 |
+| Context Compaction | 历史压缩、引用和回放 | 使用 Host 自己的裁剪策略 |
+| Background Execution | 长任务、轮询和恢复 | 使用 Host Worker 或同步超时 |
+
+能力快照应进入 Trace 和 Checkpoint。恢复时如果模型能力、输出 Schema 或 Provider 协议发生不兼容变化，应重新规划或明确拒绝恢复，而不是静默替换模型继续执行。
+
+双语言的最小一致性测试位于 [`examples/model-capability-contract/`](https://github.com/dollarser/modern-ai-agent-architecture/tree/main/examples/model-capability-contract)。它使用 Fake Provider 验证能力支持和 fail-closed 降级，不把 Fake Provider 当作真实模型适配器。
+
 ### 2.6 五类正交概念：主体、能力、协议、集成与分发
 
 Agent 生态中的名词不能排成一棵“从大到小”的包含树。它们回答的是五个不同问题，因此应作为正交概念理解：
@@ -233,27 +252,35 @@ Application / Agent Host
 
 ```mermaid
 flowchart LR
-    Package["Plugin / Skill 包"] -->|安装与校验| Catalog["Catalog"]
-    Catalog -->|启用与发现| Host["Agent Host"]
-    Host -->|构造运行| Subject["Agent / Subagent"]
+    Package["Plugin / Skill 包"] --> Discover["发现"]
+    Discover --> Verify["验证来源、版本、依赖、校验和"]
+    Verify --> Install["安装到隔离目录"]
+    Install --> Enable["启用"]
+    Enable --> Host["Agent Host / Catalog"]
+    Host --> Load["加载候选能力"]
+    Load --> Authorize["按主体、租户和 Run 授权"]
+    Authorize --> Subject["Agent / Subagent"]
     Profile["ExpertProfile"] -->|配置| Subject
     Skill["Skill 指令"] -->|加载到 Context| Subject
     Subject -->|提出 Tool Call| Runtime["Runtime + Policy"]
     Runtime -->|授权后路由| Tool["Tool Handler"]
     Tool -->|可选| Connector["Connector Adapter"]
     Tool -->|可选经 Client| MCP["MCP Server"]
+    Tool -->|任务结束或撤销| Unload["卸载 / 撤销"]
 ```
 
-> **图 2-7：** 从分发、发现到运行和执行的完整边界。Skill 中即使附带脚本，也只能要求 Agent 经 Runtime 暴露的文件、命令或专用 Tool 执行；Skill Loader 不直接运行脚本。
+> **图 2-7：** 扩展从发现、验证、安装、启用、加载、授权到执行/卸载的教学边界。Skill 中即使附带脚本，也只能要求 Agent 经 Runtime 暴露的文件、命令或专用 Tool 执行；Skill Loader 不直接运行脚本。
 
 | 阶段 | 主要对象 | 必须回答的治理问题 |
 |------|----------|--------------------|
-| 安装 | Plugin、Skill、Connector 配置 | 来源是否可信、版本是否兼容、完整性是否通过 |
-| 启用 | Plugin、Connector、MCP Server | 当前作用域是否允许，依赖与认证是否就绪 |
-| 发现 | Skill 元数据、Tool Schema、ExpertProfile | 本次运行应看到哪些候选项，名称如何消歧 |
-| 装载 | Skill 正文、Profile、Tool 快照 | 内容是否可信，权限是否按父子关系收窄 |
-| 调用 | Agent/Subagent → Runtime → Tool | 参数、策略、审批、沙箱、超时是否通过 |
-| 观测 | Observation、Trace、Checkpoint | 结果是否脱敏、可追踪、可恢复与可撤销 |
+| 发现 | Plugin/Skill/Connector 元数据 | 来源从哪里来，本次运行有哪些候选项？ |
+| 验证 | Manifest、版本、依赖、校验和 | 来源、版本、依赖和完整性是否可信？ |
+| 安装 | 隔离目录、Catalog、配置 | 是否原子写入，失败能否回滚？ |
+| 启用 | Plugin、Skill、Connector、MCP Server | 当前作用域是否允许，认证和依赖是否就绪？ |
+| 加载 | Skill 正文、Profile、Tool 快照 | 内容是否进入正确 Context，权限是否收窄？ |
+| 授权 | Agent/Subagent → Policy/Approval | 主体、租户、参数、审批和 Sandbox 是否通过？ |
+| 执行 | Runtime → Tool/Connector/MCP | 是否有超时、幂等、取消和统一错误语义？ |
+| 卸载/撤销 | Registry、Context、连接和凭据 | 新 Run 是否不再可见，外部副作用如何核对？ |
 
 因此，`安装成功 ≠ 已启用 ≠ 对本次运行可见 ≠ 获准调用`。这一分层贯穿第 9、11～16 章。
 
@@ -499,7 +526,7 @@ Agent 完成所有任务：
 
 ## 5. 组件交互时序
 
-### 5.1 完整交互时序
+### 5.1 教学交互时序
 
 ```mermaid
 sequenceDiagram
@@ -557,7 +584,7 @@ sequenceDiagram
     end
 ```
 
-> **图 2-4：** 组件交互时序图。展示从 Prompt 到 Finish 的完整交互顺序，以及 Hooks 在生命周期中的拦截点。
+> **图 2-4：** 组件交互教学时序图。展示从 Prompt 到 Finish 的典型顺序，以及 Hooks 在生命周期中的拦截点；具体 Runtime 终态和错误语义以第 9 章为准。
 
 ---
 
@@ -621,7 +648,7 @@ class AgentMemory:
 
 
 class AgentRuntime:
-    """Agent 运行时 - 完整主循环实现"""
+    """Agent 运行时 - 教学主循环实现"""
 
     def __init__(self, config: AgentConfig):
         self.config = config

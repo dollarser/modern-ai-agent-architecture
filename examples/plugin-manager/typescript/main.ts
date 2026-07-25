@@ -19,6 +19,17 @@ function versionLess(left: string, right: string): boolean {
   const a = versionTuple(left), b = versionTuple(right)
   return a[0] !== b[0] ? a[0] < b[0] : a[1] !== b[1] ? a[1] < b[1] : a[2] < b[2]
 }
+async function checksumTree(root: string): Promise<string> {
+  const digest = createHash("sha256")
+  const walk = async (directory: string): Promise<void> => {
+    for (const entry of (await readdir(directory, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
+      if (entry.name === ".installed.json" || entry.name === ".installed.json.tmp") continue
+      const full = path.join(directory, entry.name)
+      if (entry.isDirectory()) await walk(full); else { digest.update(path.relative(root, full)); digest.update(await readFile(full)) }
+    }
+  }
+  await walk(root); return digest.digest("hex")
+}
 async function manifestAt(directory: string): Promise<PluginManifest> {
   const value = JSON.parse(await readFile(path.join(directory, "plugin.json"), "utf8")) as PluginManifest
   if (!value.name || !value.version || !value.description || !value.entrypoint) throw new Error("plugin.json 缺少必填字段")
@@ -41,6 +52,9 @@ export class PluginCatalog {
     const manifest = await manifestAt(directory)
     const metadata = JSON.parse(await readFile(path.join(directory, ".installed.json"), "utf8"))
     return { manifest, path: directory, source: metadata.source, checksum: metadata.checksum, enabled: metadata.enabled }
+  }
+  async verifyIntegrity(name: string): Promise<boolean> {
+    const item = await this.get(name); return (await checksumTree(item.path)) === item.checksum
   }
 }
 
@@ -92,6 +106,7 @@ export class PluginInstaller {
     }
     await this.writeMetadata(item.path, item.source, item.checksum, enabled); return this.catalog.get(name)
   }
+  async revoke(name: string): Promise<InstalledPlugin> { return this.setEnabled(name, false) }
   async remove(name: string): Promise<void> {
     const item = await this.catalog.get(name)
     const dependents = (await this.catalog.list()).filter((other) =>
@@ -111,13 +126,6 @@ export class PluginInstaller {
     }
   }
   private async checksum(root: string): Promise<string> {
-    const digest = createHash("sha256")
-    const walk = async (directory: string): Promise<void> => {
-      for (const entry of (await readdir(directory, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
-        const full = path.join(directory, entry.name)
-        if (entry.isDirectory()) await walk(full); else { digest.update(path.relative(root, full)); digest.update(await readFile(full)) }
-      }
-    }
-    await walk(root); return digest.digest("hex")
+    return checksumTree(root)
   }
 }

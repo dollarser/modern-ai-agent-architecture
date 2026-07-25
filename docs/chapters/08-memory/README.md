@@ -14,7 +14,7 @@
 1. 理解 Agent 中 Memory 的分级存储模型
 2. 掌握短期记忆、工作记忆、长期记忆的设计与实现
 3. 理解记忆的检索、更新和遗忘策略
-4. 实现一个完整的 Memory 系统
+4. 实现一个可运行的 Memory 教学系统，并理解生产替换边界
 5. 避免 Memory 无限增长等常见反模式
 
 ---
@@ -79,7 +79,16 @@ graph TD
 
 ## 2. Memory 系统实现
 
-### 2.1 完整 Memory 系统
+### 2.1 Memory 教学实现
+
+本节的字段治理由可运行示例同步验证：[Memory / Context Contract](https://github.com/dollarser/modern-ai-agent-architecture/tree/main/examples/memory)。示例使用确定性实现验证 `tenant_id`、`subject_id`、`provenance`、`trust`、`consent` 和 `retention_until`；它不替代生产数据库、删除传播、索引擦除或合规审计。
+
+测试入口：
+
+```bash
+python -m unittest discover -s examples/memory/python -p 'test_*.py' -v
+npm --prefix examples/memory/typescript test
+```
 
 ```python
 """

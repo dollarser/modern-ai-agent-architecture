@@ -8,13 +8,15 @@
 |------|------|------|---------|
 | REF-001 | OpenAI Function Calling Documentation | [platform.openai.com](https://platform.openai.com/docs/guides/function-calling) | 第6章 |
 | REF-002 | Anthropic Tool Use Documentation | [docs.anthropic.com](https://docs.anthropic.com/en/docs/build-with-claude/tool-use) | 第6章 |
-| REF-003 | MCP Specification v2025-06-18 | [modelcontextprotocol.io](https://modelcontextprotocol.io/specification/2025-06-18) | 第 13 章 |
+| REF-003 | MCP Specification v2025-11-25 | [modelcontextprotocol.io](https://modelcontextprotocol.io/specification/2025-11-25) | 第 13 章 |
 | REF-004 | Claude Code Documentation | [docs.anthropic.com](https://docs.anthropic.com/en/docs/claude-code) | 第 19 章 |
 | REF-005 | GitHub Copilot Documentation | [docs.github.com](https://docs.github.com/en/copilot) | 第 19 章 |
 | REF-006 | OpenAI Agents SDK | [openai.github.io](https://openai.github.io/openai-agents-python/) | 第 19 章 |
 | REF-007 | LangGraph Documentation | [langchain-ai.github.io/langgraph](https://langchain-ai.github.io/langgraph/) | 第 19 章 |
 | REF-008 | Continue Documentation | [docs.continue.dev](https://docs.continue.dev/) | 第 19 章 |
 | REF-009 | Cursor Documentation | [docs.cursor.com](https://docs.cursor.com/) | 第 19 章 |
+| REF-010 | A2A Protocol Specification | [github.com/a2aproject/A2A](https://github.com/a2aproject/A2A/blob/main/docs/specification.md) | 第 15、16、20 章 |
+| REF-011 | OpenTelemetry GenAI Semantic Conventions | [opentelemetry.io](https://opentelemetry.io/docs/specs/semconv/registry/attributes/gen-ai/) | 第 17、18 章 |
 
 ## 学术论文
 
@@ -44,7 +46,7 @@
 
 | 编号 | 规范 | 来源 | 相关章节 |
 |------|------|------|---------|
-| REF-201 | MCP Specification v2025-06-18 | [modelcontextprotocol.io](https://modelcontextprotocol.io/specification/2025-06-18) | 第 13 章 |
+| REF-201 | MCP Specification v2025-11-25 | [modelcontextprotocol.io](https://modelcontextprotocol.io/specification/2025-11-25) | 第 13 章 |
 | REF-202 | JSON Schema Specification | [json-schema.org](https://json-schema.org/) | 第6章 |
 | REF-203 | OpenAPI Specification | [swagger.io/specification](https://swagger.io/specification/) | 第6章, 第 14 章 |
 
