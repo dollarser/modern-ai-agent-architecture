@@ -154,6 +154,7 @@ flowchart TB
 **核心突破：** 证明了 Scaling Law——更大的模型、更多的数据、更多的算力可以带来可预测的能力提升。
 
 **局限性：**
+
 - 模型本身不会自动获取实时信息
 - 模型本身不会执行外部副作用
 - 输出不可控（幻觉问题）
@@ -168,11 +169,13 @@ flowchart TB
 **出现原因：** 随着 LLM 能力的提升，如何有效地「引导」模型输出成为关键问题。Prompt Engineering 从一种「技巧」逐渐发展为一门系统性的工程学科。
 
 **核心突破：**
+
 - **Chain-of-Thought（CoT）：** 通过让模型「逐步思考」显著提升推理能力 (Wei et al., 2022)
 - **Few-shot Prompting：** 通过少量示例引导模型行为
 - **System Prompt：** 定义模型的全局行为准则
 
 **局限性：**
+
 - Prompt 的质量高度依赖人工设计
 - 复杂任务需要极长的 Prompt
 - 无法超越模型的固有知识边界
@@ -186,11 +189,13 @@ flowchart TB
 **出现原因：** 用户需要模型不只是「说」，还能「做」——调用 API、查询数据库、操作文件。OpenAI 在 2023 年 6 月推出了 Function Calling 能力。
 
 **核心突破：**
+
 - 模型能够输出结构化的函数调用请求（函数名 + 参数 JSON）
 - 开发者可以定义函数签名（JSON Schema），模型据此决定调用哪个函数
 - 打通了 LLM 与外部系统的连接
 
 **局限性：**
+
 - 函数调用只是「请求」，需要外部代码执行
 - 缺乏统一的 Tool 抽象
 - 错误处理依赖开发者自行实现
@@ -204,11 +209,13 @@ flowchart TB
 **出现原因：** Function Calling 解决了「如何调用」的问题，但「有哪些工具可用」仍然需要开发者手动集成。OpenAI Plugins 试图通过插件市场解决工具发现和标准化的问题。
 
 **核心突破：**
+
 - 标准化的插件 manifest 格式
 - 插件市场生态
 - 自动化的工具发现
 
 **局限性：**
+
 - 封闭生态，依赖 OpenAI 平台
 - 插件审核和分发流程复杂
 - 安全性依赖于 OpenAI 的审核机制
@@ -223,11 +230,13 @@ flowchart TB
 **出现原因：** 单纯调用工具不够，Agent 需要在「推理」和「行动」之间交替进行，形成闭环。ReAct 论文提出了 Reasoning + Acting 的范式。
 
 **核心突破：**
+
 - 将推理（Thought）和行动（Action）交替进行
 - 每次行动后观察结果（Observation），再决定下一步
 - 形成了一个完整的 Agent 循环
 
 **局限性：**
+
 - 循环可能无限进行（需要最大步数限制）
 - 缺乏长期规划能力
 - 对复杂多步骤任务效率较低
@@ -241,11 +250,13 @@ flowchart TB
 **出现原因：** Function Calling 是 OpenAI 的实现，Tool Calling 则是更通用的抽象。Anthropic 在 Claude 中引入了 Tool Use，Google 在 Gemini 中引入了 Function Calling，Tool Calling 成为跨模型的标准能力。
 
 **核心突破：**
+
 - 统一的 Tool 抽象（名称、描述、参数 Schema）
 - 跨模型的 Tool Calling 支持
 - 更丰富的 Tool 类型（Built-in、MCP、Plugin）
 
 **局限性：**
+
 - Tool 的选择和调度仍需要框架层实现
 - 缺乏统一的 Tool 注册和发现机制
 - Tool 数量增多导致选择困难
@@ -259,11 +270,13 @@ flowchart TB
 **出现原因：** 有了 Tool Calling 和 ReAct 循环，还需要一个运行环境来管理 Agent 的生命周期、状态和组件协调。Memory 模块使得 Agent 能「记住」历史信息。
 
 **核心突破：**
+
 - Agent Runtime 统一管理生命周期
 - Memory 模块实现分级存储（短期/中期/长期）
 - 上下文窗口管理策略
 
 **局限性：**
+
 - Memory 的长期一致性仍是挑战
 - 上下文窗口有限，需要裁剪策略
 - 跨 Session 的记忆管理复杂
@@ -277,12 +290,14 @@ flowchart TB
 **出现原因：** 每个 Agent 框架都需要集成各种外部上下文和能力，但缺乏统一的互操作协议。Anthropic 在 2024 年底推出了 MCP（Model Context Protocol），旨在标准化 Tool、Resource、Prompt 等能力的连接与协作。
 
 **核心突破：**
+
 - 开放协议，不绑定任何特定模型或框架
 - 标准化的 Tool、Resource 与 Prompt 能力模型
 - 连接后发现 Server 已声明的能力；具体暴露和刷新策略由 Host 决定
 - Client-Server 架构，支持多语言实现
 
 **局限性：**
+
 - 协议仍在快速演进中
 - 安全性（任意 MCP Server 可能带来风险）
 - 性能（网络延迟、序列化开销）
@@ -296,6 +311,7 @@ flowchart TB
 **出现原因：** 当 Agent 需要跨团队、框架或供应商协作时，仅连接 Tool 和数据源还不够，还需要表达 Agent 能做什么、任务处于什么状态以及最终产物如何交付。
 
 **核心突破：**
+
 - 用 Agent Card 描述能力、接口和安全要求
 - 用 Task、Message、Artifact 表达异步任务、消息和产物
 - 支持流式更新、输入补充、取消和长时间运行
@@ -324,6 +340,7 @@ flowchart TB
 ```
 
 **工程重点：**
+
 - “主动执行”必须有 Trigger、频率限制、幂等键和取消入口
 - 个人数据需要按用户、设备、会话和租户隔离
 - 长期记忆应区分事实、偏好、任务状态和临时上下文，并支持删除与纠错
@@ -336,6 +353,7 @@ Open WebUI 展示了自托管、本地/远程模型、RBAC、工具、Skill、MC
 **出现原因：** 将 Agent 架构应用于软件开发领域，出现了 GitHub Copilot、Claude Code、Cursor、Continue 等 Coding Agent，它们代表了 Agent 架构的最前沿实践。
 
 **核心特征：**
+
 - 工作区、仓库、分支或 Worktree 是一等运行资源
 - 文件读取、补丁编辑、终端、测试、浏览器等工具组成 Agent-Computer Interface
 - Harness 提供上下文组装、工具循环、沙箱、超时、审批和反馈
@@ -343,6 +361,7 @@ Open WebUI 展示了自托管、本地/远程模型、RBAC、工具、Skill、MC
 - 长任务需要 Checkpoint、恢复、取消、日志和产物归档
 
 **当前挑战：**
+
 - 代码生成的准确性和可靠性
 - 大型代码库的上下文管理
 - 安全性和权限控制
