@@ -81,12 +81,14 @@ Load → Read → Reasoning → Planning → Execute → Observe → Finish
 | Skill 脚本边界 | [图 12-3：Skill 脚本安全执行链](../chapters/12-skills/README.md) | 第 12 章 |
 | Hooks | [图 10-1：Hook 在生命周期中的位置](../chapters/10-hooks/README.md) | 第 10 章 |
 | MCP | [图 13-1：MCP 架构](../chapters/13-mcp/README.md) | 第 13 章 |
+| MCP + A2A | [图 13-4：MCP 与 A2A 联合架构](../chapters/13-mcp/README.md) | 第 13 章 |
 | Connector | [第 13 章：Connector 产品集成层](../chapters/13-mcp/README.md) | 第 13 章 |
 | Plugin | [图 14-1：Plugin 的组成结构](../chapters/14-plugin-system/README.md) | 第 14 章 |
 | Expert Profile / Subagent | [第 15 章：Expert Profile 与 Subagent](../chapters/15-design-patterns/README.md) | 第 15 章 |
 | Memory | [图 8-1：Memory 分级存储模型](../chapters/08-memory/README.md) | 第 8 章 |
 | Runtime | [图 9-1：Runtime 的核心职责](../chapters/09-runtime/README.md) | 第 9 章 |
 | Tool Registry | [图 11-1：Tool Registry 架构](../chapters/11-tool-registry/README.md) | 第 11 章 |
+| Personal Assistant Host | [图 16-6：Personal Assistant Host 的教学组装](../chapters/16-agent-host/README.md) | 第 16 章 |
 
 ## 流程与交互图
 

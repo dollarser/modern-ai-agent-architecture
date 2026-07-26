@@ -72,7 +72,7 @@
 ### 2.2 推理策略对比
 
 ```mermaid
-flowchart LR
+flowchart TB
     subgraph CoT["Chain-of-Thought"]
         direction TB
         A1[问题] --> A2[逐步思考]

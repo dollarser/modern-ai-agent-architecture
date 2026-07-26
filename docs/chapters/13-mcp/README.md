@@ -787,6 +787,8 @@ flowchart TB
     Artifact -->|Artifact reference| HostA
 ```
 
+> **图 13-4：** MCP 与 A2A 联合架构。MCP 负责 Host 与外部能力的连接，A2A 负责独立 Agent 系统之间的 Task 委派；两条链路最终都回到各自 Host 的身份、Policy、Artifact 和审计边界。
+
 图中 Agent A 可以通过 MCP 获取外部数据或工具，也可以通过 A2A 委派一个跨系统 Task。MCP 的 Tool 结果和 A2A 的 Artifact 都必须经过 Host 的身份、权限、大小、保留期和来源校验，不能因为协议标准化就绕过本地治理。
 
 ### 6.6 A2A 教学实现与协议边界

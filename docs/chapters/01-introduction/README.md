@@ -374,7 +374,7 @@ OpenAI Agents SDK、LangGraph、Google ADK 和 Pydantic AI 的公开文档分别
 现代 Agent 工程不能只用一条更长的 Prompt 解释。随着系统开始调用外部能力、维护状态、接受反馈并跨 Run 工作，工程对象逐步扩大；这不是后一项技术淘汰前一项技术，而是多组可以组合的实践。
 
 ```mermaid
-flowchart LR
+flowchart TB
     Prompt["Prompt Engineering<br/>设计任务表达"] --> Tool["Tool Engineering<br/>设计结构化行动"]
     Prompt --> Context["Context Engineering<br/>设计模型可见信息"]
     Tool --> Workflow["Workflow Engineering<br/>设计控制流"]

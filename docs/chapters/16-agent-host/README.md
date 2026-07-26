@@ -624,6 +624,8 @@ flowchart TB
     Memory --> Audit
 ```
 
+> **图 16-6：** Personal Assistant Host 的教学组装。渠道和主动触发进入 Identity、Session 与 Runtime，Memory、Policy、Tool/Connector/MCP 和 Audit 分别承担状态、治理、能力接入与数据生命周期职责；该图不表示生产系统的具体部署拓扑。
+
 **一次请求的教学路径：**
 
 ```text
