@@ -397,7 +397,7 @@ Profile 合并建议采用“默认值 → 组织策略 → 项目配置 → 本
 
 ### 6.5 本地 Handoff 与跨系统 A2A
 
-> **阅读边界：** 本节只回答“什么时候从本地 Handoff 升级为跨系统协作、如何设计委派边界”。A2A 的 Agent Card、Task、Message、Artifact、状态和版本语义见第 13 章“ A2A：Agent-to-Agent 互操作”。
+> **阅读边界：** 本节只回答“什么时候从本地 Handoff 升级为跨系统协作、如何设计委派边界”。A2A 的 Agent Card、Task、Message、Artifact、状态和版本语义见第 13 章的“A2A：Agent-to-Agent 互操作”一节。
 
 Handoff 解决的是同一 Host 或同一应用内部的控制权转移；当协作方属于不同团队、不同运行时或不同信任边界时，还需要约定发现、任务状态、结果交付与身份验证。A2A（Agent-to-Agent）等跨 Agent 协议尝试解决这一层互操作，但它们不替代 Tool 协议，也不替代本地的委派契约。
 

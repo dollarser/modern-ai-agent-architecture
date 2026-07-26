@@ -16,7 +16,7 @@
 - [当前实现与出版基线](specs/book/11-current-baseline.md)
 - [完整技术书共创工作流](specs/technical-book-coauthoring-workflow.md)
 
-全书共 20 章，按六部分组织：基础认知、构建首个 Agent、可靠运行、扩展与互操作、规模化与生产、案例与索引。
+全书共 20 章，按六部分组织：基础认知、构建首个 Agent、可靠运行、扩展与互操作、规模化与生产、案例、选型与索引。
 
 ## 本地阅读
 
