@@ -23,7 +23,7 @@
 ## 第四部分：扩展与互操作
 
 - [第 12 章 Skills：可复用工作流](chapters/12-skills/README.md)
-- [第 13 章 MCP：模型上下文协议](chapters/13-mcp/README.md)
+- [第 13 章 MCP 与 Agent 互操作协议](chapters/13-mcp/README.md)
 - [第 14 章 Plugin 体系](chapters/14-plugin-system/README.md)
 
 ## 第五部分：规模化与生产
@@ -33,10 +33,10 @@
 - [第 17 章 工程实践与生产部署](chapters/17-engineering-practice/README.md)
 - [第 18 章 最佳实践、评估与反模式](chapters/18-best-practices/README.md)
 
-## 第六部分：案例与索引
+## 第六部分：案例、选型与索引
 
-- [第 19 章 主流框架架构分析](chapters/19-framework-analysis/README.md)
-- [第 20 章 常见架构问题与选型指南](chapters/20-faq/README.md)
+- [第 19 章 主流框架与开源项目架构分析](chapters/19-framework-analysis/README.md)
+- [第 20 章 架构选型、迁移与常见问题](chapters/20-faq/README.md)
 
 ## 附录
 
@@ -54,8 +54,8 @@
 |------|------------|
 | 初学者（最快动手） | 第 1 章 → 第 2 章 → 第 3 章 → 第 6 章 → 第 7 章 |
 | 初学者（系统学习） | 第 1～7 章顺序阅读 |
-| AI 应用开发者 | 第 2 章 → 第 6 章 → 第 13 章 → 第 8 章 → 第 17 章 |
+| AI 应用开发者 | 第 2 章 → 第 6 章 → 第 8 章 → 第 13 章 → 第 16 章 → 第 17 章 |
 | Agent Framework 开发者 | 第 2 章 → 第 5 章 → 第 9 章 → 第 11 章 → 第 15 章 |
 | Coding Agent 实践者 | 第 3 章 → 第 4 章 → 第 6～7 章 → 第 9～13 章 → 第 16～18 章 |
-| IDE 插件开发者 | 第 2 章 → 第 10 章 → 第 13 章 → 第 19 章 |
+| IDE 插件开发者 | 第 2 章 → 第 10 章 → 第 13 章 → 第 16 章 → 第 19 章 |
 | 企业平台开发者 | 第 2 章 → 第 14 章 → 第 19 章 → 第 17 章 → 第 18 章 |

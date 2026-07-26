@@ -13,7 +13,7 @@
 
 1. 将第 7 章 MVP 与第 8～15 章能力组装为一个可运行 Agent
 2. 用 Port / Adapter 隔离 Runtime 与具体基础设施
-3. 让 Skills、MCP 和 Plugin 通过统一扩展边界进入 Agent
+3. 让 Skills、MCP、A2A 和 Plugin 通过统一扩展边界进入 Agent
 4. 理解 Agent Host 组件与 Harness Engineering 实践的区别
 5. 在 Tool 副作用之前加入 Hook、策略和人工审批
 6. 用 Handoff、Subagent 和 Event Bus 完成最小编排闭环
@@ -26,7 +26,7 @@
 
 - 阅读第 7 章「Agent MVP：从零实现」
 - 建议阅读第 8～11 章的可靠运行组件
-- 阅读第 12 章「Skills」、第 13 章「MCP」和第 14 章「Plugin」，理解扩展能力如何进入 Context 与 Tool Registry
+- 阅读第 12 章「Skills」、第 13 章「MCP 与 Agent 互操作协议」和第 14 章「Plugin」，理解外部能力与跨 Agent Task 如何进入 Host
 - 阅读第 15 章，理解单 Agent、Handoff、Subagents 与事件驱动架构的适用边界
 - 了解依赖注入、异步执行和结构化数据接口
 
@@ -591,6 +591,62 @@ Artifact 的读取也必须经过租户、主体、Run 和保留期检查。不�
 对应的最小双语言契约测试位于 [A2A Task / Artifact 示例](https://github.com/dollarser/modern-ai-agent-architecture/tree/main/examples/a2a-task-artifact)。示例只实现协议模型和内存 Artifact Store，刻意不把内存实现描述成生产级持久化或远程传输。
 
 Agent Host 还提供 [HostA2AAdapter](https://github.com/dollarser/modern-ai-agent-architecture/tree/main/examples/agent-host)，把远程 Task 的提交、状态观察和 Artifact 读取绑定到 `run_id`。远程 Transport、认证和持久化由注入的 Client/Store 负责，适配层不会绕过 Host 的身份与恢复边界。
+
+### 7.7 个人 AI 助理纵向切片
+
+个人 AI 助理与 Code Agent 可以复用同一个 Agent Runtime，但 Host 的一等资源和安全边界不同。本节提供一个教学组装模型，不把它描述为完整的生产个人助理。
+
+```mermaid
+flowchart TB
+    Channel[消息渠道 / Web / CLI]
+    Trigger[定时器 / Webhook / 用户触发]
+    Identity[Identity Provider<br/>用户 · 租户 · 设备]
+    AssistantHost[Personal Assistant Host]
+    Session[Session / Conversation]
+    Memory[Memory<br/>事实 · 偏好 · 任务状态]
+    Policy[Policy / Approval / Notification]
+    Runtime[Agent Runtime<br/>Task · Run · Checkpoint]
+    Tools[Tools / Connectors / MCP]
+    External[外部服务与设备]
+    Audit[Audit / Deletion / Revocation]
+
+    Channel --> AssistantHost
+    Trigger --> AssistantHost
+    Identity --> AssistantHost
+    AssistantHost --> Session
+    Session --> Runtime
+    Memory --> Runtime
+    Runtime --> Policy
+    Policy --> Tools
+    Tools --> External
+    Runtime --> Audit
+    Session --> Audit
+    Memory --> Audit
+```
+
+**一次请求的教学路径：**
+
+```text
+消息 / Trigger
+→ 身份与租户校验
+→ 加载 Session 和受权限过滤的 Memory
+→ 创建新的 Task / Run
+→ Decision → Tool / Connector / MCP
+→ 高风险动作进入 Approval
+→ 写入结果、通知和 Checkpoint
+→ 支持取消、撤销或用户删除记忆
+```
+
+| 设计面 | Personal Assistant | Code Agent |
+|--------|--------------------|------------|
+| 一等资源 | Identity、Session、Memory、Trigger、Channel | Workspace、Repository、Worktree、Patch、Test、Sandbox |
+| 长任务 | 定时任务、Webhook、通知和用户补充 | 编码、测试、审查、CI 和变更交付 |
+| 主要风险 | 隐私泄露、越权主动执行、记忆错误、通知滥发 | 任意代码执行、凭据泄露、错误修改、供应链风险 |
+| 必须具备 | 租户隔离、记忆删除、撤销、幂等和审批 | 沙箱、路径限制、命令白名单、Patch 审批和验证器 |
+
+个人助理的长期记忆不应把所有历史对话永久保留。至少要区分事实、用户偏好、任务状态和临时上下文，并为每类数据定义来源、用途、保留期、删除和纠错操作。定时器或 Webhook 触发的 Run 必须带有幂等键、频率限制、过期时间和用户可见的取消入口。
+
+这是 **教学组装**，不是生产级个人助理实现。真实部署还需要多租户存储、消息队列、凭据轮换、通知重试、设备授权、审计保留和分布式并发控制。
 
 ---
 

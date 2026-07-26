@@ -1,8 +1,8 @@
-# 第 13 章：MCP：模型上下文协议
+# 第 13 章：MCP 与 Agent 互操作协议
 
-> **维护边界：** 本章是 MCP 协议与 Client/Server/Manager 边界的唯一正文来源；第 16 章只描述 Host Adapter，第 17 章只补充认证、沙箱、供应链和运维约束。
+> **维护边界：** 本章是 MCP、A2A 及其 Client/Server 边界的唯一协议正文来源；第 15 章只讨论跨 Agent 模式与选型，第 16 章只描述 Host Adapter，第 17 章只补充认证、沙箱、供应链和运维约束。
 
-MCP Server/Connector 纳入全书统一扩展生命周期：`发现 → 验证 → 安装 → 启用 → 加载 → 授权 → 执行 → 卸载`。本章重点展开其中的协议初始化、能力协商、连接和 Tool 调用；安装治理见 Manager，用户与资源授权见 Host Policy，真实 Transport 与生产隔离见第 17 章。
+MCP Server/Connector 纳入全书统一扩展生命周期：`发现 → 验证 → 安装 → 启用 → 加载 → 授权 → 执行 → 卸载`。本章重点展开 MCP/A2A 的协议初始化、能力协商、任务和产物交付；安装治理见 Manager，用户与资源授权见 Host Policy，真实 Transport 与生产隔离见第 17 章。
 
 > **难度等级：** ⭐⭐⭐⭐
 > **所属模块：** 第四部分：扩展与互操作
@@ -21,6 +21,8 @@ MCP Server/Connector 纳入全书统一扩展生命周期：`发现 → 验证 �
 4. 实现一个 MCP Client 和 MCP Server
 5. 理解 MCP 与 Function Calling 的关系和区别
 6. 区分 MCP 协议、具体产品 Connector 与 Plugin 分发单元
+7. 理解 A2A 的 Agent Card、Task、Message、Artifact 与异步任务状态
+8. 区分 MCP、A2A、ACP 与本地 Handoff 的互操作边界
 
 ---
 
@@ -693,9 +695,111 @@ App（用户看见和授权）
 
 ---
 
-## 6. MCP Transport 层
+## 6. A2A：Agent-to-Agent 互操作
 
-### 6.1 支持的 Transport
+MCP 主要连接 Host/Client 与外部 Tool、Resource、Prompt；A2A 主要连接相互独立的 Agent 系统。A2A 不要求调用方了解远程 Agent 的内部模型、Prompt、Tool 或推理过程，而是通过公开能力、任务状态和交付物完成协作。
+
+### 6.1 A2A 的定位与边界
+
+| 互操作边界 | 代表机制 | 主要交换对象 | 不负责什么 |
+|------------|----------|--------------|------------|
+| Host ↔ Tool/Context Server | MCP | Tool、Resource、Prompt、Client 能力 | 不负责 Agent 之间的业务委派 |
+| Independent Agent ↔ Agent | A2A | Agent Card、Task、Message、Artifact、状态事件 | 不要求共享内部推理和 Tool 实现 |
+| Editor/Client ↔ Coding Agent | ACP | Session、Prompt、工具/终端更新 | 不替代 Host Policy 或业务授权 |
+| Parent Agent ↔ Subagent | 本地 Handoff | 委派输入、预算、能力快照、结构化结果 | 不自动形成跨系统协议 |
+
+A2A 适合跨团队、跨供应商、跨语言或不同信任边界的 Agent 协作；同一 Host 内的 Subagent 优先使用本地 Handoff 或 Runner Port，避免为进程内调用引入不必要的网络和协议复杂度。
+
+> **来源类型：** Fact + 工程推导 —— A2A 的公开规范定义跨 Agent 的任务和产物模型；本地 Handoff、Host Policy 和 ACP 的职责边界属于本书的工程分类。
+
+### 6.2 A2A 核心数据模型
+
+| 对象 | 作用 | 关键边界 |
+|------|------|----------|
+| Agent Card | 描述 Agent 身份、能力、技能、接口、认证和支持的交互方式 | 来源、版本和认证要求必须在调用前验证 |
+| Message | 发起任务、补充输入、请求澄清或传递上下文 | 不是可靠的最终结果存储 |
+| Task | 跨请求持续存在的工作单元 | 由 Server 分配 `taskId`，不能用客户端任意字符串创建新任务 |
+| Artifact | Task 产生的文件、结构化数据或其他交付物 | 通过引用、媒体类型、大小和校验和访问 |
+| Task Status | 描述任务当前进度和终态 | `working`、`input-required`、`completed` 等必须区分 |
+| Status/Artifact Event | 推送状态变化或增量产物 | Streaming、Polling、Push 只是传输方式，不改变任务语义 |
+
+一个 A2A `contextId` 可以将多个相关 Task 和 Message 组织在同一个交互上下文中；它不等同于本书 Host 内部的 `session_id`。A2A `taskId` 是远程 Server 管理的协议任务，也不等同于本地 `run_id`。
+
+### 6.3 A2A 任务生命周期
+
+```mermaid
+stateDiagram-v2
+    [*] --> Submitted: send message
+    Submitted --> Working: Agent 接管任务
+    Working --> InputRequired: 需要补充信息
+    InputRequired --> Working: 继续发送消息
+    Working --> ApprovalRequired: 等待外部审批
+    ApprovalRequired --> Working: 批准或修改
+    ApprovalRequired --> Canceled: 拒绝或取消
+    Working --> ArtifactReady: 产生 Artifact
+    ArtifactReady --> Working: 仍有后续步骤
+    Working --> Completed: 验证通过
+    Working --> Failed: 不可恢复错误
+    Working --> Canceled: 客户端取消
+    Completed --> [*]
+    Failed --> [*]
+    Canceled --> [*]
+```
+
+> **图 13-3：** A2A Task 的教学生命周期。真实规范版本可能增加或调整状态；`completed` 只表示协议任务进入终态，不代表下游副作用已经被业务方确认。
+
+任务状态至少应携带 `task_id`、`context_id`、状态、事件序号、时间戳和原因。长任务还需要定义超时、过期、取消请求、重试和恢复语义。网络超时不能直接推断远程 Tool 未执行，重试不可逆操作必须使用幂等键和下游执行标识。
+
+### 6.4 Agent Card、授权与版本
+
+调用远程 Agent 前，Host 至少应完成以下检查：
+
+1. 验证 Agent Card 的来源、版本、端点和声明的能力；
+2. 依据租户、调用主体、数据区域和任务类型筛选可用能力；
+3. 校验协议版本、支持的传输绑定、流式能力和认证要求；
+4. 为本次 Task 生成独立的身份、预算、过期时间和幂等键；
+5. 将远程 Agent 的能力声明转化为本地可审计的 Policy，而不是直接信任描述文本。
+
+远程 Agent 声称支持某个 Skill，不等于本地用户已批准该能力；A2A Server 通过认证，也不等于本次 Tool 或数据访问已获授权。Host 仍需在远程调用前后执行本地 Policy、Approval、审计和 Artifact 访问控制。
+
+### 6.5 MCP 与 A2A 联合架构
+
+```mermaid
+flowchart TB
+    User[用户 / 上游应用]
+    HostA[Agent Host A]
+    AgentA[Agent A]
+    MCPClient[MCP Client]
+    MCPServer[MCP Server]
+    A2AClient[A2A Client Adapter]
+    HostB[Agent Host B]
+    AgentB[Agent B]
+    Artifact[Artifact Store]
+
+    User --> HostA
+    HostA --> AgentA
+    AgentA --> MCPClient
+    MCPClient --> MCPServer
+    AgentA --> A2AClient
+    A2AClient -->|Task / Message| HostB
+    HostB --> AgentB
+    AgentB --> Artifact
+    Artifact -->|Artifact reference| HostA
+```
+
+图中 Agent A 可以通过 MCP 获取外部数据或工具，也可以通过 A2A 委派一个跨系统 Task。MCP 的 Tool 结果和 A2A 的 Artifact 都必须经过 Host 的身份、权限、大小、保留期和来源校验，不能因为协议标准化就绕过本地治理。
+
+### 6.6 A2A 教学实现与协议边界
+
+本书的 [A2A Task / Artifact 示例](https://github.com/dollarser/modern-ai-agent-architecture/tree/main/examples/a2a-task-artifact)使用内存传输，验证 Agent Card、幂等 Task、状态事件、Artifact 引用和租户访问控制。它是协议模型的教学实现，不是完整的远程 A2A Server。
+
+示例没有实现完整的 HTTP/REST、gRPC、认证服务器、服务发现或持久化队列；生产实现还必须补充 Agent Card 来源验证、协议版本协商、身份认证、取消传播、重试、Artifact 保留和审计。
+
+> **来源类型：** Fact + 工程推导 —— A2A 的规范事实以 [官方规范](https://github.com/a2aproject/A2A/blob/main/docs/specification.md) 为准；本书对 Host Policy、幂等、Artifact 访问和教学实现边界的说明属于工程约束。
+
+## 7. MCP Transport 层
+
+### 7.1 支持的 Transport
 
 | Transport | 说明 | 适用场景 |
 |-----------|------|---------|
@@ -703,14 +807,14 @@ App（用户看见和授权）
 | Streamable HTTP | 单一 HTTP 端点；可选使用 SSE 传递流式消息 | 远程服务 |
 | 旧版 HTTP+SSE | v2024-11-05 的旧传输 | 仅在兼容旧客户端或旧 Server 时使用 |
 
-### 6.2 安全考量
+### 7.2 安全考量
 
 - **Tool 白名单：** Agent 应维护允许调用的 Tool 白名单
 - **权限确认：** 敏感操作（文件写入、网络请求）需要用户确认
 - **沙箱隔离：** MCP Server 应在受限环境中运行
 - **输入校验：** Agent 应校验 MCP Server 返回的数据
 
-### 6.3 远程 MCP 的授权边界
+### 7.3 远程 MCP 的授权边界
 
 对于 HTTP 传输，MCP 规范定义了基于 OAuth 的可选授权机制；`stdio` 本地进程通常从受控环境获取凭据，不能直接套用浏览器 OAuth 流程。无论采用哪种方式，都应区分“连接到 Server 的凭据”和“允许 Agent 执行具体 Tool 的用户授权”。
 
@@ -728,7 +832,7 @@ App（用户看见和授权）
 
 ---
 
-## 7. 最佳实践
+## 8. 最佳实践
 
 1. **MCP Server 单一职责：** 每个 Server 聚焦一个领域（文件系统、数据库、API），不要混合。
 2. **Tool 描述精准：** Tool 的名称、描述与输入 Schema 是 Host 向模型呈现能力的重要信号，必须清晰准确；Host 仍可结合策略、权限和上下文决定是否暴露或调用它。
@@ -739,7 +843,7 @@ App（用户看见和授权）
 
 ---
 
-## 8. 反模式
+## 9. 反模式
 
 | 反模式 | 风险 | 推荐方案 |
 |--------|------|---------|
@@ -750,7 +854,7 @@ App（用户看见和授权）
 
 ---
 
-## 9. FAQ
+## 10. FAQ
 
 ### Q: MCP 和 OpenAI Function Calling 有什么区别？
 
@@ -764,9 +868,13 @@ MCP 是面向 LLM 应用的上下文和能力协议，提供 Tool、Resource、P
 
 可以。这是 MCP 的核心设计目标之一。Agent 可以同时连接文件系统 Server、数据库 Server、第三方 API Server 等，所有 Tool 统一管理。
 
+### Q: MCP 和 A2A 应该如何选择？
+
+当 Agent 需要发现并调用外部 Tool、Resource 或 Prompt 时使用 MCP；当一个 Agent 需要把跨系统、可能长时间运行且需要状态更新的任务委托给另一个 Agent 时使用 A2A。两者可以组合：MCP 负责能力接入，A2A 负责 Agent 间任务协作。
+
 ---
 
-## 10. 官方参考
+## 11. 官方参考
 
 | 编号 | 来源 | 类型 | 说明 |
 |------|------|------|------|
@@ -778,10 +886,12 @@ MCP 是面向 LLM 应用的上下文和能力协议，提供 Tool、Resource、P
 | REF-6 | [MCP Authorization](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization) | 官方规范 | HTTP 传输的授权边界 |
 | REF-7 | [MCP v2025-11-25 Key Changes](https://modelcontextprotocol.io/specification/2025-11-25/changelog) | 官方规范 | Tasks、Schema 与授权等版本变化 |
 | REF-8 | [MCP Architecture](https://modelcontextprotocol.io/specification/2025-11-25/architecture) | 官方规范 | Host、Client、Server 的职责和一对一会话边界 |
+| REF-9 | [A2A Protocol Specification](https://github.com/a2aproject/A2A/blob/main/docs/specification.md) | 官方规范 | Agent Card、Task、Message、Artifact 与任务生命周期 |
+| REF-10 | [A2A Project](https://a2a-protocol.org/) | 官方项目 | A2A 的定位、实现与生态入口 |
 
 ---
 
-## 11. 延伸阅读
+## 12. 延伸阅读
 
 - [MCP Architecture Overview](https://modelcontextprotocol.io/docs/concepts/architecture) —— MCP 架构详解
 - [Building MCP Servers](https://modelcontextprotocol.io/docs/concepts/server) —— 官方 Server 开发指南
@@ -791,7 +901,7 @@ MCP 是面向 LLM 应用的上下文和能力协议，提供 Tool、Resource、P
 
 ## 本章小结
 
-MCP 标准化 Host 与外部 Tool、Resource、Prompt 等能力之间的连接，但不负责 Agent 的推理和任务编排。协议互操作并不会自动解决授权、信任和数据治理；实现时还必须绑定具体规范版本，并由 Host 明确审批与隔离策略。
+MCP 标准化 Host 与外部 Tool、Resource、Prompt 等能力之间的连接；A2A 标准化跨系统 Agent 的发现、任务协作和产物交付。两者都不负责完整的 Agent 推理与 Host 治理，协议互操作也不会自动解决授权、信任和数据治理。
 
 Connector 则位于具体产品集成层，管理服务身份、凭据引用、授权范围、端点、数据映射与健康状态。它可以使用 MCP，但两者不能互换。
 
@@ -809,3 +919,6 @@ Connector 则位于具体产品集成层，管理服务身份、凭据引用、�
 - [ ] 能持久化、启停、刷新并安全卸载 MCP Server
 - [ ] 运行了 MCP Client/Server 与 Manager 示例代码
 - [ ] 阅读了 MCP 官方规范
+- [ ] 能解释 Agent Card、Task、Message、Artifact 与 A2A 任务状态
+- [ ] 能判断一个场景应使用 MCP、A2A、ACP 还是本地 Handoff
+- [ ] 运行了 A2A Task / Artifact 教学示例，并明确其未覆盖的生产边界

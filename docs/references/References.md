@@ -15,7 +15,9 @@
 | REF-007 | LangGraph Documentation | [langchain-ai.github.io/langgraph](https://langchain-ai.github.io/langgraph/) | 第 19 章 |
 | REF-008 | Continue Documentation | [docs.continue.dev](https://docs.continue.dev/) | 第 19 章 |
 | REF-009 | Cursor Documentation | [docs.cursor.com](https://docs.cursor.com/) | 第 19 章 |
-| REF-010 | A2A Protocol Specification | [github.com/a2aproject/A2A](https://github.com/a2aproject/A2A/blob/main/docs/specification.md) | 第 15、16、20 章 |
+| REF-010 | A2A Protocol Specification | [github.com/a2aproject/A2A](https://github.com/a2aproject/A2A/blob/main/docs/specification.md) | 第 13、15、16、20 章 |
+| REF-012 | Google Agent Development Kit | [google.github.io/adk-docs](https://google.github.io/adk-docs/) | 第 19、20 章 |
+| REF-013 | Pydantic AI Documentation | [ai.pydantic.dev](https://ai.pydantic.dev/) | 第 19、20 章 |
 | REF-011 | OpenTelemetry GenAI Semantic Conventions | [opentelemetry.io](https://opentelemetry.io/docs/specs/semconv/registry/attributes/gen-ai/) | 第 17、18 章 |
 
 ## 学术论文
@@ -57,6 +59,11 @@
 | REF-301 | Awesome MCP Servers | [github.com/punkpeye/awesome-mcp-servers](https://github.com/punkpeye/awesome-mcp-servers) | 第 13 章 |
 | REF-302 | Awesome LLM Agents | [github.com/hyp1231/awesome-llm-powered-agent](https://github.com/hyp1231/awesome-llm-powered-agent) | 全书 |
 | REF-303 | Anthropic Courses - Tool Use | [github.com/anthropics/courses](https://github.com/anthropics/courses) | 第6章 |
+| REF-304 | OpenHands | [github.com/All-Hands-AI/OpenHands](https://github.com/All-Hands-AI/OpenHands) | 第 16、19、20 章 |
+| REF-305 | SWE-agent | [github.com/SWE-agent/SWE-agent](https://github.com/SWE-agent/SWE-agent) | 第 16、19 章 |
+| REF-306 | Aider | [aider.chat](https://aider.chat/) | 第 16、19 章 |
+| REF-307 | Cline | [github.com/cline/cline](https://github.com/cline/cline) | 第 16、19 章 |
+| REF-308 | Open WebUI | [github.com/open-webui/open-webui](https://github.com/open-webui/open-webui) | 第 16、19 章 |
 
 ---
 

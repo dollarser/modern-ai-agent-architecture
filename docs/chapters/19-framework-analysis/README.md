@@ -1,7 +1,7 @@
-# 第 19 章：主流框架架构分析
+# 第 19 章：主流框架与开源项目架构分析
 
 > **难度等级：** ⭐⭐⭐⭐⭐
-> **所属模块：** 第六部分：案例与索引
+> **所属模块：** 第六部分：案例、选型与索引
 > **来源可信度：** 官方文档 / 源码 / 推导 / 观点
 > **状态：** ✅ 已完成
 > **事实核查日期：** 2026-07-24
@@ -14,7 +14,7 @@
 完成本章学习后，你将能够：
 
 1. 理解代表性 Agent 产品、SDK 与开源项目的架构设计
-2. 对比各框架在 Runtime、Tool Registry、Memory、MCP、Hooks、Skills 等维度的设计差异
+2. 对比各框架在 Runtime、Tool Registry、Memory、MCP、A2A、Hooks、Skills 等维度的设计差异
 3. 掌握框架选型的评估标准
 4. 理解各框架的设计哲学和适用场景
 5. 从框架设计中提取可复用的架构模式
@@ -52,6 +52,13 @@ graph TD
     subgraph "开源个人 Agent"
         Hermes[Hermes Agent]
         OpenClaw[OpenClaw]
+        OpenWebUI[Open WebUI<br/>自托管 Host]
+    end
+    subgraph "开源 Code Agent"
+        OpenHands[OpenHands<br/>Agent Server / Sandbox]
+        SWEAgent[SWE-agent<br/>ACI / Repo Task]
+        Aider[Aider<br/>Git Pair Programming]
+        Cline[Cline<br/>CLI / IDE / SDK]
     end
 ```
 
@@ -73,6 +80,12 @@ graph TD
 | Hooks | 生命周期事件拦截 |
 | Skills | 可复用工作流支持 |
 | Context 管理 | 上下文窗口管理策略 |
+| Agent / Host 形态 | SDK、Personal Assistant、Code Agent 或 Agent Server 的边界 |
+| 状态与恢复 | Session、Task、Run、Checkpoint、Artifact 和长任务恢复 |
+| Sandbox / Workspace | 文件、命令、网络、工作区和进程的实际执行边界 |
+| Approval / Policy | `allow / ask / deny`、人工介入、撤销和审计 |
+| Agent Interoperability | MCP、A2A、ACP 的支持范围和协议边界 |
+| Evaluation / Trace | 轨迹、评估、成本、质量和安全指标的可观测性 |
 
 > **来源类型：** 推导分析 —— 基于各框架官方文档和源码的架构分析。标注为「推导」的内容基于公开信息推断，可能与实际实现有差异。
 
@@ -364,6 +377,21 @@ Continue 是开源的 AI 代码助手，以 VS Code / JetBrains 插件形式运�
 | OpenClaw | 扩展发现不应绕过 Host 的 Tool Policy；用户控制和来源信息应进入运行治理 |
 
 **官方或一手资料：** [Codex MCP](https://developers.openai.com/codex/mcp/)、[Codex Skills](https://developers.openai.com/codex/skills/)、[Codex Security](https://developers.openai.com/codex/security/)、[OpenCode MCP](https://opencode.ai/docs/mcp-servers/)、[OpenCode Permissions](https://opencode.ai/docs/permissions/)、[Hermes Agent](https://github.com/nousresearch/hermes-agent)、[OpenClaw Tools](https://github.com/openclaw/openclaw/blob/main/docs/tools/index.md)。
+
+## 8.6 按产品形态补充对标
+
+不同项目的共同价值不在于“谁更像 Agent”，而在于它们把模型决策放进了什么 Host 和执行边界：
+
+| 形态 | 代表项目 | 一等资源 | 主要工程问题 |
+|------|----------|----------|--------------|
+| Agent Framework / SDK | OpenAI Agents SDK、LangGraph、Google ADK、Pydantic AI | Agent、Graph、Runner、Session、Tool、Trace | 编排、类型/Schema、状态、评估和模型替换 |
+| Personal Assistant Host | Open WebUI、Hermes Agent、OpenClaw | User、Channel、Session、Memory、Trigger、Connector | 隐私、主动任务、记忆删除、通知和多租户 |
+| Code Agent | OpenHands、SWE-agent、Aider、Cline | Workspace、Repository、Worktree、Patch、Test、Artifact | 沙箱、代码变更、验证反馈、审批和供应链 |
+| Agent Interoperability | MCP、A2A、ACP 生态 | Server、Agent Card、Task、Artifact、Session | 发现、版本、认证、能力协商和跨信任边界 |
+
+这些项目不能用同一张“功能越多越好”的排行榜比较。SDK 需要看可编排性与可测试性，个人助理需要看身份、数据和主动任务治理，Code Agent 需要看 Workspace/Sandbox/Verifier，互操作协议需要看版本、认证、任务状态和产物交付。
+
+> **来源类型：** Fact + 推导分析 —— 项目定位以其公开仓库和文档为准；表中的“一等资源”和“主要工程问题”是本书对公开能力的架构归纳，不推断闭源内部实现。
 
 ---
 

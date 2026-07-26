@@ -1,8 +1,8 @@
-# 第 20 章：常见架构问题与选型指南
+# 第 20 章：架构选型、迁移与常见问题
 
 > **难度等级：** ⭐⭐
 > **注意：** 附录 [FAQ 问题索引](../../faq/FAQ.md) 只负责定位；本章是全书 FAQ 的唯一完整答案来源。
-> **所属模块：** 第六部分：案例与索引
+> **所属模块：** 第六部分：案例、选型与索引
 > **来源可信度：** 官方文档 / 源码 / 论文 / 推导 / 观点
 > **状态：** ✅ 已完成
 
@@ -14,7 +14,9 @@
 
 1. 快速查找常见问题的答案
 2. 发现进一步学习的方向
-3. 了解 Agent 领域的前沿趋势
+3. 根据任务、部署和治理约束选择 Agent 架构或框架
+4. 设计从 Workflow、单 Agent 或本地 Code Agent 到更大系统的迁移路径
+5. 了解 Agent 领域的前沿趋势
 
 ---
 
@@ -55,7 +57,11 @@ Workflow 的下一步主要由代码、DAG 或状态机决定；Agent 由模型�
 
 **Q: MCP 会取代 Function Calling 吗？**
 
-不会。MCP 是外部上下文与能力的互操作协议，可涉及 Tool、Resource、Prompt 等能力；Function Calling 是模型发出结构化工具调用的一类机制。两者可配合，但不互相取代。（-> 详见第 13 章「MCP」和第 6 章「Tools 与 Function Calling」）
+不会。MCP 是外部上下文与能力的互操作协议，可涉及 Tool、Resource、Prompt 等能力；Function Calling 是模型发出结构化工具调用的一类机制。两者可配合，但不互相取代。（-> 详见第 13 章「MCP 与 Agent 互操作协议」和第 6 章「Tools 与 Function Calling」）
+
+**Q: MCP 和 A2A 应该如何选择？**
+
+需要连接外部 Tool、Resource 或 Prompt 时选择 MCP；需要让相互独立的 Agent 发现能力、创建长任务、交换状态或交付 Artifact 时选择 A2A。两者可以同时使用：一个 Agent 通过 MCP 操作外部系统，再通过 A2A 委派另一个 Agent。不要把 A2A Task 当成本地 Run，也不要把 MCP Server 当成远程 Agent。（→ 详见第 13 章）
 
 **Q: Agent 应该有多少个 Tool？**
 
@@ -83,11 +89,31 @@ Memory 关注「存什么」和「怎么检索」，Context 关注「当前放�
 
 **Q: 应该选择哪个 Agent 框架？**
 
-先确定任务形态和控制边界：IDE/终端产品优先比较其本地工作流与企业策略；自定义 Agent 比较 Tool、状态、审批和 tracing 的 SDK 能力；显式状态图或复杂恢复流程再评估工作流框架。产品能力与定价变化很快，不能用单一“推荐榜”替代版本、部署、数据边界和团队技能的核查。（-> 详见第 19 章「主流框架架构分析」）
+先确定任务形态和控制边界：IDE/终端产品优先比较其本地工作流与企业策略；自定义 Agent 比较 Tool、状态、审批和 tracing 的 SDK 能力；显式状态图或复杂恢复流程再评估工作流框架。产品能力与定价变化很快，不能用单一“推荐榜”替代版本、部署、数据边界和团队技能的核查。（-> 详见第 19 章「主流框架与开源项目架构分析」）
 
 **Q: 开源框架和闭源产品如何选择？**
 
 需要深度定制、私有部署或可审计扩展时，可比较 SDK/工作流框架的许可证、运行边界和运维成本；需要现成 IDE/终端体验时，可比较产品的权限模型、数据策略、部署方式与企业治理能力。不要把“开源”自动等同于可控或安全，也不要把“产品化”自动等同于低运维或低风险。（-> 详见第 19 章）
+
+**Q: 从 Workflow 迁移到 Agent 时，哪些部分不应该交给模型？**
+
+身份校验、权限计算、金额或资源上限、审批、幂等、事务提交、审计和终态判断不应仅交给模型。迁移时应保留确定性外层流程，只把确实需要基于 Observation 动态选择的节点替换为 Agent，并为每个节点定义输入、Tool、预算、验证器和失败语义。
+
+**Q: 从单 Agent 迁移到 Multi-Agent 需要先增加什么？**
+
+先增加明确的 Subagent 委派契约：任务边界、输入上下文、可用 Tool、权限、预算、输出 Schema、取消和验收条件。只有任务能够并行、确实需要专业上下文隔离或存在清晰的控制权转移时，才引入 Multi-Agent；不要用多个角色 Prompt 替代任务边界和状态治理。（→ 详见第 15 章）
+
+**Q: 本地 Code Agent 迁移到远程 Agent Host 时要检查什么？**
+
+重点检查 Workspace 挂载、凭据边界、网络出口、沙箱、Artifact 存储、Session/Run 恢复、审批 UI、日志脱敏和取消传播。远程化不会自动获得更强的安全性；必须重新定义谁拥有文件、命令、网络和长期任务的权限。（→ 详见第 16、17 章）
+
+**Q: Personal Assistant 和 Code Agent 应共用一个 Host 吗？**
+
+可以共用 Runtime 抽象，但不应默认共用所有权限和状态。Personal Assistant 以 Identity、Session、Memory、Trigger 和 Channel 为核心；Code Agent 以 Workspace、Repository、Worktree、Patch、Test 和 Sandbox 为核心。两者可以通过受控 Handoff 或 A2A 协作，但应隔离用户数据、凭据和副作用策略。（→ 详见第 16 章）
+
+**Q: 更换 Agent Framework 或 SDK 时，如何降低迁移风险？**
+
+先把 Agent 与框架绑定的部分隔离为 Adapter：Model Provider、Tool Port、Session Store、Checkpoint Store、Trace、Approval 和 Handoff。然后用相同任务集、相同 Tool 契约、相同数据边界和相同评估指标做双跑，对比结果质量、轨迹、安全违规、成本、延迟和恢复行为。不要只比较最终文本。
 
 ### 实践与部署
 
