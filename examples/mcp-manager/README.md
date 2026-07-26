@@ -10,4 +10,12 @@ python main.py --config .agent/mcp.json list
 python main.py --config .agent/mcp.json disable catalog
 ```
 
+TypeScript 契约测试：
+
+```bash
+cd ../typescript
+npm ci
+npm test
+```
+
 真实实现应以官方 SDK 替换 Transport Factory，并补充 OAuth、超时、重连、Server 身份校验和进程沙箱。

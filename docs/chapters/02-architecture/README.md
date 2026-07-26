@@ -13,10 +13,11 @@
 
 1. 理解 AI Agent 的完整架构及各组件职责
 2. 掌握 Agent 主循环的完整流程
-3. 理解 Agent 生命周期的 7 个关键阶段
+3. 理解一个可教学的 Agent Run 生命周期，并知道不同框架会采用不同状态模型
 4. 理解各组件之间的交互时序
 5. 建立从整体架构到具体组件的认知框架
 6. 使用“运行主体、能力、协议、产品集成、分发单元”分类相邻概念
+7. 区分 Agent Framework/SDK、个人 AI 助理 Host 与 Code Agent Harness
 
 ---
 
@@ -48,8 +49,9 @@
 
 1. **关注点分离（Separation of Concerns）：** 推理、规划、执行、记忆各自独立
 2. **可扩展性（Extensibility）：** 通过 Plugin、MCP 等机制动态扩展能力
-3. **可观测性（Observability）：** 通过 Hooks 暴露生命周期事件
-4. **可组合性（Composability）：** 组件可独立替换和组合
+3. **可观测性（Observability）：** 通过 Hooks、Middleware、Trace 和事件记录暴露运行过程
+4. **可恢复性（Durability）：** 通过 Checkpoint、幂等、取消和重试支持长任务与人工介入
+5. **可组合性（Composability）：** 组件可独立替换和组合
 
 ---
 
@@ -102,6 +104,9 @@ flowchart TB
 | MCP | 连接外部 Tool、Resource、Prompt 等能力的互操作协议 | 外部能力接口标准 |
 | Connector | 接入具体产品的身份、授权、端点与数据映射 | 某个服务的接入适配器 |
 | Plugin | 安装、版本化、启停和分发一组 Host 扩展 | 可治理的扩展包 |
+| Framework / SDK | 提供 Agent、Runner、Graph、Session、Tool 和观测等构建抽象 | 开发与运行工具箱 |
+| Personal Assistant Host | 围绕用户身份、长期会话、主动触发和多渠道运行 Agent | 个人服务入口与治理边界 |
+| Code Agent Harness | 围绕工作区、代码工具、沙箱、验证器和变更交付运行 Agent | 受控的软件工程环境 |
 
 > **来源类型：** 推导分析 —— 基于 Claude Code、OpenAI Agents SDK 等框架的组件设计
 
@@ -110,13 +115,13 @@ flowchart TB
 各组件的核心关系可以概括为：
 
 - **Prompt + Instructions → Agent 的输入约束**
-- **Reasoning + Planning → Agent 的决策层**
+- **Reasoning / Planning → Agent 的可选决策策略**
 - **Tool + Skill → Agent 可请求使用的能力层**
 - **MCP → Host 与独立 Server 互操作的协议层**
 - **Connector → Host 接入具体产品的集成层**
 - **Plugin → Host 安装和治理扩展的分发层**
 - **Memory → Agent 的状态层**
-- **Hooks → Agent 的横切关注点**
+- **Hooks / Middleware / Guardrails → Agent 的横切观察与控制层**
 - **Agent Host → 运行并治理 Agent/Subagent，而不是替代 Agent 做业务决策**
 
 ### 2.4 Scaffolding、Harness、Runtime 与 Orchestration
@@ -239,7 +244,9 @@ Application / Agent Host
 │   ├── Tool
 │   └── Skill
 ├── 协议（Protocol）
-│   └── MCP
+│   ├── MCP
+│   ├── A2A
+│   └── ACP
 ├── 产品集成（Product Integration）
 │   └── Connector
 └── 分发单元（Distribution Unit）
@@ -251,7 +258,7 @@ Application / Agent Host
 #### 2.6.2 同一个扩展从安装到执行经过什么
 
 ```mermaid
-flowchart LR
+flowchart TB
     Package["Plugin / Skill 包"] --> Discover["发现"]
     Discover --> Verify["验证来源、版本、依赖、校验和"]
     Verify --> Install["安装到隔离目录"]
@@ -308,6 +315,7 @@ flowchart TB
 | Agent Run | Agent 对 Task 的一次有开始、终态和预算的执行尝试 | Session、Agent 定义 |
 | Subagent Run | 带 `parent_run_id` 和委派契约的子执行 | ExpertProfile、普通函数调用 |
 | Session | 多轮交互、身份和可共享状态的作用域 | 单次 Run、永久 Memory |
+| A2A Task | A2A 协议中的跨 Agent 工作单元，由服务端分配 `taskId`，可产生状态更新和 Artifact | Host 内部 Task、Agent Run、普通消息 |
 | Conversation | Session 中面向参与者的消息序列 | 完整 Runtime 状态或 Trace |
 | Checkpoint | 某个 Run 在某个 revision 的可恢复快照 | Memory、备份、审计日志 |
 | Trace | Run/子 Run/Tool 调用的因果与观测事件链 | 可直接恢复的状态快照 |
@@ -315,6 +323,32 @@ flowchart TB
 `resume` 从兼容 Checkpoint 继续未完成 Run；`replay` 读取或重演既有事件，默认不得再次产生外部副作用。`task_id` 用于业务目标，`run_id` 标识一次尝试，`idempotency_key` 用于下游副作用去重，三者不能复用为同一个概念。
 
 > **来源类型：** Fact + 工程推导 —— A2A 官方规范用 `contextId` 组合多个 Task，并为 Task 分配独立 ID；本书据此区分 Session/Context 与 Task，再为 Host 内部可恢复尝试定义 `run_id`。Trace/Span 的父子因果语义可与 OpenTelemetry 对齐，但 OpenTelemetry 是通用可观测性标准，不是 Agent 框架，也不定义 Task、Run 或 Session。
+
+#### 2.7.1 四个容易混淆的身份
+
+| 身份 | 由谁创建 | 作用域 | 典型状态 | 是否可直接恢复 |
+|---|---|---|---|---|
+| `Session` | Host 或应用 | 用户、租户或设备的一组交互 | active / idle / expired | 不能直接恢复执行，只能提供共享上下文 |
+| `Task` | Host 或业务系统 | 一个业务目标 | open / canceled / retried / resolved | 通过新的或已有 Run 继续 |
+| `Run` | Runtime | Task 的一次执行尝试 | created / running / waiting / completed / failed / canceled | 可以从兼容 Checkpoint 恢复 |
+| A2A `Task` | A2A Server | 跨 Agent 的协议任务 | submitted / working / input-required / completed / failed / canceled | 由协议操作继续、查询或取消；不等同于本地 Run |
+
+关系可以简化为：
+
+```text
+Session
+└── Task（本地业务目标）
+    ├── Run #1（一次执行尝试）
+    │   ├── Checkpoint
+    │   └── Subagent Run
+    └── Run #2（重试或恢复后的新尝试）
+
+Agent Run ──跨系统委派──> A2A Task
+                         ├── Message
+                         └── Artifact
+```
+
+不要把四个 ID 复用为同一个字段：`session_id` 表示交互作用域，`task_id` 表示业务目标，`run_id` 表示一次执行，A2A `taskId` 表示协议服务端管理的跨 Agent 任务。它们可以通过 metadata 或关联表建立映射，但不能假定天然一一对应。
 
 ### 2.8 Workflow、Agent 与 Orchestrator
 
@@ -343,6 +377,20 @@ flowchart TB
 
 这些实践通常同时存在。例如，一个 Coding Agent 的单次 Run 需要 Prompt、Context、Tool 与 Harness；定时扫描 Issue、为每项工作创建隔离 Run、独立验证并在人工门禁处停止，则进一步需要 Loop Engineering。
 
+### 2.10 从框架/SDK到个人助理和 Code Agent
+
+开发框架/SDK、个人 AI 助理和 Code Agent 不是三个互斥的 Agent 类型，而是三个不同的系统边界：
+
+| 形态 | 主要边界 | 一等资源 | 典型控制点 |
+|---|---|---|---|
+| Framework / SDK | 开发者与 Agent Runtime 之间 | Agent、Graph、Runner、Tool、Session、Trace | 类型校验、编排、依赖注入、评估、观测 |
+| Personal Assistant | 用户与长期运行 Host 之间 | Identity、Session、Memory、Trigger、Channel | 数据隔离、主动任务、通知、审批、撤销 |
+| Code Agent | Agent 与软件工作区之间 | Workspace、Repository、Worktree、Patch、Test、Artifact | 沙箱、命令权限、Git、验证器、人工审查 |
+
+因此，一个个人助理可以由某个 SDK 构建，并在需要时委派 Code Agent；一个 Code Agent 也可以被个人助理通过定时器或消息渠道触发。架构设计时应先确定“谁拥有状态和副作用”，再决定使用哪个框架或产品外壳。
+
+开源实践说明了这种分层：Open WebUI 将自托管模型、用户权限、Tools、Skills 和 MCP 组合为可部署入口；OpenHands 将 Agent Server、工作区、自动化和多种 Agent 后端组合为开发者控制中心；Cline 同时提供 CLI、IDE、SDK 和人工审批；Aider 则强调 Git 工作区、代码编辑和测试反馈。[Open WebUI](https://github.com/open-webui/open-webui)、[OpenHands](https://github.com/OpenHands/OpenHands)、[Cline](https://github.com/cline/cline)、[Aider](https://aider.chat/docs/)
+
 ---
 
 ## 3. Agent 主循环
@@ -353,21 +401,31 @@ Agent 的主循环（Agent Loop）是 Agent 运行的核心机制：
 
 ```mermaid
 flowchart TD
-    Start([开始]) --> Prompt[接收 Prompt]
-    Prompt --> Read[读取 Instructions]
-    Read --> Reason[Reasoning<br/>推理分析]
-    Reason --> Plan[Planning<br/>制定计划]
-    Plan --> CheckSkill{需要<br/>Skill?}
-    CheckSkill -->|是| LoadSkill[加载 Skill]
-    LoadSkill --> CallTool
-    CheckSkill -->|否| CallTool[Tool Calling<br/>调用工具]
-    CallTool --> Observe[Observation<br/>观察结果]
-    Observe --> Decide{任务<br/>完成?}
-    Decide -->|否| Reason
-    Decide -->|是| Finish([完成])
+    Start([Run Started]) --> Context[Build Context<br/>Prompt · Instructions · State]
+    Context --> Decision[Model Decision]
+    Decision --> Final[Final Answer]
+    Decision --> ToolProposal[Tool Proposal]
+    Decision --> Handoff[Handoff / Subagent]
+    Decision --> Ask[Ask User]
+    Decision --> Abort[Abort / Escalate]
+    ToolProposal --> Validate[Validate Schema]
+    Validate --> Policy[Policy / Guardrail / Approval]
+    Policy -->|Deny| Denied[Denied Observation]
+    Policy -->|Approval Required| Wait[Waiting for Human]
+    Policy -->|Allow| Execute[Execute Tool]
+    Wait -->|Approve| Execute
+    Wait -->|Edit| Validate
+    Wait -->|Reject| Denied
+    Execute --> Result[Tool Result]
+    Result --> Checkpoint[Checkpoint / Trace]
+    Checkpoint --> Verify[Verify / Evaluate]
+    Verify -->|Continue| Decision
+    Verify -->|Retry / Compensate| Execute
+    Verify -->|Complete| Final
+    Verify -->|Failed| Abort
 ```
 
-> **图 2-2：** Agent 主循环。从 Prompt 到 Reasoning → Planning → Tool Calling → Observation 的循环，直到任务完成。
+> **图 2-2：** Agent Run 的决策与执行边界。`Planning` 是 Decision 的一种策略，不是所有任务的必经阶段；Tool 必须先经过 Schema、Policy、Approval 和 Runtime 才能产生外部副作用。
 
 ### 3.2 主循环各阶段详解
 
@@ -379,36 +437,36 @@ flowchart TD
 
 Agent 读取全局 Instructions（System Prompt 的一部分）。Instructions 定义 Agent 的行为准则，如「始终使用中文回复」「不要编造信息」「遇到不确定的情况请询问用户」。
 
-**阶段 3：Reasoning（推理）**
+**阶段 3：Decision（决策）**
 
-Agent 基于当前上下文（Prompt + Instructions + 历史对话 + Memory）进行推理。推理的目标是分析任务需求、确定需要哪些信息、判断是否需要调用工具。
+Agent 基于当前上下文（Prompt + Instructions + 历史对话 + Memory）形成下一步决策。决策可能是直接回答、调用 Tool、委派 Subagent、请求用户补充、等待审批或终止；Reasoning 是模型完成决策的一种内部过程，不要求暴露完整思维链。
 
-**阶段 4：Planning（规划）**
+**阶段 4：Planning（可选规划）**
 
-如果任务较为复杂，Agent 需要制定执行计划。规划可以是：
+如果任务较为复杂，Agent 可以制定执行计划。规划可以是：
 - 隐式规划（模型内部推理）
 - 显式规划（输出结构化的步骤列表）
 - 动态规划（根据执行结果调整计划）
 
-**阶段 5：Skill 匹配（可选）**
+**阶段 5：Proposal / Handoff（动作提议或委派）**
 
-Agent 检查是否有匹配的 Skill 可以指导当前任务。Skill 提供工作流模板，告诉 Agent 如何处理特定类型的任务。注意：Skill 是读取，不是调用——Agent 将 Skill 内容加载到上下文中作为参考。
+模型提出 Tool Call、Handoff 或其他结构化动作。Skill 可以在这一阶段之前作为上下文指导，但 Skill 是知识或工作流描述，不等于已经获得执行权限。
 
-**阶段 6：Tool Calling（工具调用）**
+**阶段 6：Validate / Authorize（校验与授权）**
 
-Agent 调用 Tool 执行具体操作。Tool 可以是：
+Runtime 先校验 Schema、参数、身份、Policy、预算、Sandbox 和 Approval，再决定是否执行。Tool 可以是：
 - Built-in Tool：框架内置工具（如文件读写、搜索）
 - MCP Tool：通过 MCP 协议发现的第三方工具
 
-**阶段 7：Observation（观察）**
+**阶段 7：Execute / Observe（执行与观察）**
 
-Agent 接收 Tool 的执行结果。Observation 是下一轮 Reasoning 的输入，Agent 基于结果判断任务是否完成，或是否需要调整策略。
+Runtime 执行 Tool 并记录结果、错误、耗时和副作用状态。Agent 接收 Tool 的执行结果。Observation 是下一轮 Decision 的输入，Agent 基于结果判断任务是否完成，或是否需要重试、补偿、调整策略或请求用户介入。
 
-**阶段 8：循环判断**
+**阶段 8：Checkpoint / Verify / Finish（保存、验证与结束）**
 
-Agent 判断任务是否完成。如果完成，输出最终结果；如果未完成，回到 Reasoning 阶段，基于新的 Observation 继续推理。
+Runtime 可以在关键边界保存 Checkpoint 和 Trace，Verifier 再根据测试、Schema、业务规则或用户确认判断结果。如果完成，输出最终结果；如果未完成，回到 Decision；如果无法安全恢复，则失败或升级给人工。
 
-> **来源类型：** 推导分析 —— 基于 ReAct 论文 (Yao et al., 2022) 和 Claude Code 的实际执行流程
+> **来源类型：** 推导分析 —— 基于 ReAct 论文以及 OpenAI Agents SDK、LangGraph、Google ADK、OpenHands 等公开运行模型。这里是教学参考流程，不是所有框架的固定内部实现。
 
 ### 3.3 主循环的终止条件
 
@@ -426,42 +484,35 @@ Agent 主循环不会无限进行。终止条件包括：
 
 ### 4.1 生命周期状态机
 
-Agent 的生命周期可以用以下状态机描述：
+为了教学，本书用下面的状态机描述一次 Agent Run。它不是行业标准；框架可能用 Graph、Turn、Task 或 Event 表达同一过程。
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Load: 初始化
-    Load --> Read: 加载 Instructions
-    Read --> Reasoning: 接收 Prompt
-    Reasoning --> Planning: 推理完成
-    Planning --> Execute: 规划完成
-    Execute --> Observe: Tool 执行完毕
-    Observe --> Reasoning: 任务未完成
-    Observe --> Finish: 任务完成
-    Finish --> [*]
+    [*] --> Created: 创建 Run
+    Created --> Running: 组装 Context
+    Running --> WaitingApproval: 需要人工审批
+    WaitingApproval --> Running: 批准 / 修改
+    WaitingApproval --> Canceled: 拒绝 / 取消
+    Running --> WaitingInput: 需要用户输入
+    WaitingInput --> Running: 收到输入
+    Running --> Checkpoint: 保存状态
+    Checkpoint --> Running: 继续决策
+    Running --> Completed: 验证通过
+    Running --> Failed: 不可恢复错误
+    Running --> Canceled: 超时 / 用户取消
+    Completed --> [*]
+    Failed --> [*]
+    Canceled --> [*]
 
-    state Load {
-        [*] --> LoadInstructions
-        LoadInstructions --> LoadSkills
-        LoadSkills --> InitMemory
-        InitMemory --> [*]
-    }
-
-    state Execute {
-        [*] --> SelectTool
-        SelectTool --> CallTool
-        CallTool --> GetResult
-        GetResult --> [*]
-    }
 ```
 
-> **图 2-3：** Agent 生命周期状态机。7 个阶段：Load → Read → Reasoning → Planning → Execute → Observe → Finish。
+> **图 2-3：** 一次 Agent Run 的教学状态机。重点是等待、恢复、验证、失败和取消；`Reasoning`、`Planning`、Tool 执行等属于 `Running` 内部事件。
 
 ### 4.2 生命周期各阶段详解
 
-#### 阶段 1：Load（加载）
+#### 状态 1：Created / Running（创建与运行）
 
-Agent 启动时加载必要的资源：
+Agent Run 创建后，Host 组装并加载必要资源：
 
 - Instructions（全局规则）
 - Skills 索引（可用工作流模板列表）
@@ -470,7 +521,19 @@ Agent 启动时加载必要的资源：
 
 > **来源类型：** 推导分析 —— 基于 Claude Code 的初始化流程
 
-#### 阶段 2：Read（读取）
+#### 状态 2：Waiting（等待）
+
+Run 可能因为审批、用户补充、外部任务或限流而暂停。暂停时必须持久化足以恢复的状态，并保留取消、超时和权限过期处理。
+
+#### 状态 3：Checkpoint / Verify（保存与验证）
+
+Runtime 在工具边界、人工介入和关键阶段保存 Checkpoint；Verifier 根据测试、结构化输出、业务规则或用户确认判断是否可以继续或完成。
+
+#### 状态 4：Completed / Failed / Canceled（终态）
+
+Run 进入终态后应记录原因、结果、产物、费用、权限和外部副作用状态。`resume` 只能从兼容 Checkpoint 继续；`replay` 默认不得再次产生外部副作用。
+
+#### Running 内部事件：Context Build（上下文组装）
 
 Agent 读取当前上下文：
 
@@ -479,7 +542,7 @@ Agent 读取当前上下文：
 - 历史对话（如果有）
 - 加载的 Skill 内容（如果有匹配的 Skill）
 
-#### 阶段 3：Reasoning（推理）
+#### Running 内部事件：Reasoning / Planning（推理与可选规划）
 
 Agent 基于完整上下文进行推理：
 
@@ -487,24 +550,22 @@ Agent 基于完整上下文进行推理：
 - 确定需要的信息和工具
 - 评估当前状态和下一步方向
 
-#### 阶段 4：Planning（规划）
-
-Agent 制定执行计划：
+Planning 是可选策略，不是必经状态。需要规划时，Agent 可以：
 
 - 将复杂任务分解为子任务
 - 确定每个子任务需要的工具
 - 设定执行顺序和依赖关系
 
-#### 阶段 5：Execute（执行）
+#### Running 内部事件：Execute（执行）
 
-Agent 调用工具执行操作：
+Runtime 在完成授权后调用工具执行操作：
 
 - 选择最合适的 Tool
 - 构造 Tool 调用参数
 - 执行 Tool 调用
 - 处理执行错误
 
-#### 阶段 6：Observe（观察）
+#### Running 内部事件：Observe（观察）
 
 Agent 处理 Tool 执行结果：
 
@@ -513,7 +574,7 @@ Agent 处理 Tool 执行结果：
 - 更新 Memory 和上下文
 - 判断是否需要重试或调整
 
-#### 阶段 7：Finish（完成）
+#### 终态：Finish（完成）
 
 Agent 完成所有任务：
 
@@ -537,6 +598,10 @@ sequenceDiagram
     participant Skills
     participant ToolRegistry
     participant Tool
+    participant Runtime
+    participant Policy
+    participant Verifier
+    participant Checkpoint
     participant Memory
     participant Hooks
 
@@ -548,29 +613,38 @@ sequenceDiagram
     Memory-->>Agent: 记忆上下文
     Agent->>Hooks: AfterLoad
 
-    Agent->>Hooks: BeforeReasoning
-    Agent->>Agent: Reasoning（推理）
-    Agent->>Hooks: AfterReasoning
+    Agent->>Hooks: BeforeDecision
+    Agent->>Agent: Decision（推理 / 直接回答 / 委派 / 提问）
+    Agent->>Hooks: AfterDecision
 
-    Agent->>Hooks: BeforePlanning
-    Agent->>Planner: 规划任务
-    Planner-->>Agent: 执行计划
-    Agent->>Hooks: AfterPlanning
+    opt 需要显式规划
+        Agent->>Hooks: BeforePlanning
+        Agent->>Planner: 规划任务
+        Planner-->>Agent: 执行计划
+        Agent->>Hooks: AfterPlanning
+    end
 
     Agent->>Skills: 检查匹配 Skill
     Skills-->>Agent: Skill 内容（如有）
 
-    Agent->>Hooks: BeforeToolCall
     Agent->>ToolRegistry: 查找 Tool
     ToolRegistry-->>Agent: Tool 描述
-    Agent->>Tool: 调用 Tool
+    Agent->>Runtime: 提交 Tool Proposal
+    Runtime->>Policy: 校验参数、权限和审批
+    alt 允许执行
+        Policy-->>Runtime: Allow
+        Runtime->>Tool: 调用 Tool
+    else 需要审批或拒绝
+        Policy-->>Runtime: Wait / Deny
+    end
     Tool-->>Agent: 执行结果
     Agent->>Hooks: AfterToolCall
 
-    Agent->>Hooks: BeforeObservation
     Agent->>Agent: 观察结果
-    Agent->>Memory: 更新记忆
-    Agent->>Hooks: AfterObservation
+    Agent->>Checkpoint: 保存可恢复状态
+    Agent->>Verifier: 验证结果和完成条件
+    Verifier-->>Agent: Continue / Retry / Complete / Escalate
+    Agent->>Memory: 按策略更新记忆
 
     Agent->>Agent: 判断是否完成
 
@@ -584,7 +658,7 @@ sequenceDiagram
     end
 ```
 
-> **图 2-4：** 组件交互教学时序图。展示从 Prompt 到 Finish 的典型顺序，以及 Hooks 在生命周期中的拦截点；具体 Runtime 终态和错误语义以第 9 章为准。
+> **图 2-4：** 组件交互教学时序图。展示一种包含可选 Planning、Policy/Approval、Checkpoint 和 Verifier 的典型顺序；真实框架可能使用 Middleware、Graph、Turn 或 Event 表达同样边界。
 
 ---
 
@@ -866,7 +940,7 @@ if __name__ == "__main__":
 |--------|------|---------|
 | 单体 Agent 设计 | 所有逻辑耦合在一起，难以维护和测试 | 遵循关注点分离，组件化设计 |
 | 无限制循环 | Agent 无限执行，消耗资源 | 设置最大步数、超时、Token 预算 |
-| 跳过 Planning 阶段 | 复杂任务执行效率低，容易出错 | 为复杂任务显式规划步骤 |
+| 把 Planning 当作所有任务的必经阶段 | 简单任务增加延迟和成本 | 仅在复杂、长链路或需要审查时显式规划 |
 | 忽略 Observation | 不评估 Tool 执行结果，盲目继续 | 每次 Tool 调用后必须评估结果 |
 | Hooks 承担业务逻辑 | 耦合严重，难以调试 | Hooks 只做横切关注点（日志、监控、权限） |
 
@@ -876,11 +950,11 @@ if __name__ == "__main__":
 
 ### Q: Agent 主循环和 ReAct 循环是什么关系？
 
-Agent 主循环（Reasoning → Planning → Tool Calling → Observation）是 ReAct 循环（Thought → Action → Observation）的工程化扩展。ReAct 提供了基础范式，Agent 主循环在此基础上增加了 Planning（显式规划）、Skills（工作流模板）、Hooks（生命周期管理）等工程化组件。
+Agent 主循环可以实现为 ReAct 的工程化扩展，但不应固定为 Reasoning → Planning → Tool Calling → Observation。现代框架还可能在决策后直接回答、委派、提问、等待审批或终止；Planning、Skills、Hooks 和 Guardrails 都是可组合的工程能力。
 
 ### Q: 为什么需要显式的 Planning 阶段？
 
-对于简单任务，模型可以隐式规划（在推理中完成）。但对于复杂多步骤任务，显式规划可以：
+对于简单任务，模型可以隐式规划或直接回答。对于复杂多步骤任务，显式规划可以：
 - 提高执行效率（避免反复试错）
 - 提高可解释性（用户可以看到执行计划）
 - 便于错误恢复（某步失败时从失败步骤重试）
@@ -907,6 +981,12 @@ Agent 主循环（Reasoning → Planning → Tool Calling → Observation）是 
 | REF-2 | [OpenAI Agents SDK](https://github.com/openai/openai-agents-python) | 源码 | Agent Runtime 的参考实现 |
 | REF-3 | [Anthropic Claude Code Architecture](https://docs.anthropic.com/en/docs/claude-code) | 官方文档 | Claude Code 的架构设计 |
 | REF-4 | [LangGraph Documentation](https://langchain-ai.github.io/langgraph/) | 官方文档 | 图状态机在 Agent 中的应用 |
+| REF-5 | [Google ADK](https://adk.dev/) | 开源框架 | Agent、Session、Memory、MCP、A2A 和多语言开发 |
+| REF-6 | [Pydantic AI](https://github.com/pydantic/pydantic-ai) | 开源框架 | 类型安全、依赖注入、评估与可观测性 |
+| REF-7 | [OpenHands](https://github.com/OpenHands/OpenHands) | 开源项目 | Agent Server、工作区、沙箱和自动化 |
+| REF-8 | [SWE-agent](https://github.com/SWE-agent/SWE-agent) | 开源项目 | Agent-Computer Interface 与软件工程任务 |
+| REF-9 | [Cline](https://github.com/cline/cline) | 开源项目 | CLI、IDE、SDK、多 Agent 与人工审批 |
+| REF-10 | [Aider](https://aider.chat/docs/) | 开源项目 | Git 工作区、代码编辑与测试反馈 |
 
 ---
 
@@ -920,7 +1000,7 @@ Agent 主循环（Reasoning → Planning → Tool Calling → Observation）是 
 
 ## 本章小结
 
-总体架构的核心是职责分离：Prompt 表达任务，Instructions 约束行为，Planner 组织步骤，Tool 执行动作，Memory 保存状态，Runtime 协调整个生命周期。组件是否需要独立，取决于替换、测试、恢复和治理需求，而不是架构图是否足够复杂。
+总体架构的核心是职责分离：Prompt 表达任务，Instructions 约束行为，Agent/Graph 决定下一步，Tool 提出并执行受控动作，Verifier 判断结果，Memory/Checkpoint 保存状态，Runtime 协调整个生命周期。Planning 是可选策略；组件是否需要独立，取决于替换、测试、恢复和治理需求，而不是架构图是否足够复杂。
 
 ---
 
@@ -929,8 +1009,8 @@ Agent 主循环（Reasoning → Planning → Tool Calling → Observation）是 
 - [ ] 能画出 Agent 整体架构图
 - [ ] 理解核心组件的职责和关系
 - [ ] 能用五类正交概念区分 Agent、Subagent、Tool、Skill、MCP、Connector 与 Plugin
-- [ ] 能描述 Agent 主循环的 8 个阶段
-- [ ] 理解生命周期的 7 个状态及转换条件
+- [ ] 能描述 Agent Run 的决策、授权、执行、验证和恢复路径
+- [ ] 理解 Created、Running、Waiting、Checkpoint、Completed、Failed、Canceled 等教学状态及转换条件
 - [ ] 能画出组件交互时序图
 - [ ] 运行了 Agent 主循环示例代码
 - [ ] 理解 Hooks 在生命周期中的位置

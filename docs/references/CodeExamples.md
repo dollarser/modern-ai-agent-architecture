@@ -21,7 +21,7 @@
 | Agent MVP Minimal | `examples/agent-mvp-minimal/` | 任务、规则规划、内置 Tool、观察与终止条件 | Python, TypeScript | 第5--7章 |
 | Coding Agent 组合预览 | `examples/coding-agent-mvp/` | 轻量 Memory、Tool 映射与回调的补充演示（非最终架构） | Python, TypeScript | 第 8--11、15--16 章 |
 | Agent Host | `examples/agent-host/` | Session→Task/Run、Skill/MCP/Plugin 安装面 Adapter、扩展治理、Database Review 和受限 Read/Search/Patch/Test | Python, TypeScript | 第 16 章 |
-| A2A Task / Artifact | `examples/a2a-task-artifact/` | Agent Card、幂等 Task、状态事件、Artifact 引用与租户访问控制 | Python, TypeScript | 第 15、16、18、20 章 |
+| A2A Task / Artifact | `examples/a2a-task-artifact/` | Agent Card、幂等 Task、状态事件、Artifact 引用与租户访问控制 | Python, TypeScript | 第 13、15、16、18、20 章 |
 | Error Contract | `docs/references/Error-Contract.md` | Tool、Provider、审批、取消、恢复和预算错误的统一语义 | 文档契约 | 第 9、11、16、18 章 |
 | Evaluation Contract | `examples/evaluation-contract/` | JSON 评估用例、最终状态、Tool 轨迹、安全断言和版本化报告 | Python, TypeScript | 第 18 章 |
 | Model Capability Contract | `examples/model-capability-contract/` | Tool Calling、Structured Output、Streaming、Usage、Cancel 与能力降级 | Python, TypeScript | 第 2、17、18 章 |

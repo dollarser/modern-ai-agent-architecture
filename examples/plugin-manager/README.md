@@ -11,4 +11,12 @@ python main.py --root .agent/plugins disable plugin-name
 python main.py --root .agent/plugins remove plugin-name
 ```
 
+TypeScript 契约测试：
+
+```bash
+cd ../typescript
+npm ci
+npm test
+```
+
 生产实现还需要签名、发布者信任、兼容性求解、进程沙箱、资源配额和安全更新策略。

@@ -41,9 +41,9 @@
 | **第一部分：基础认知** | 1-4 | 历史演进、五类正交概念、总体架构、Prompt/Instructions、Context 管理 |
 | **第二部分：构建首个 Agent** | 5-7 | Reasoning/Planning、Tools/Function Calling、Agent MVP |
 | **第三部分：可靠运行** | 8-11 | Memory、Runtime、Hooks、Tool Registry |
-| **第四部分：扩展与互操作** | 12-14 | Skills、MCP、Connector、Plugin 体系 |
+| **第四部分：扩展与互操作** | 12-14 | Skills、MCP/A2A、Connector、Plugin 体系 |
 | **第五部分：规模化与生产** | 15-18 | 设计模式、Agent Host 组装、工程实践、最佳实践与评估 |
-| **第六部分：案例与索引** | 19-20 | 产品、SDK 与开源项目分析、常见架构问题、选型指南 |
+| **第六部分：案例、选型与索引** | 19-20 | 产品、SDK 与开源项目分析、迁移、常见架构问题与选型指南 |
 
 ## 快速开始
 
@@ -102,7 +102,7 @@ npm run start
 |------|------|------|
 | 正文字量 | 以结构完整、可导航、无明显重复和可维护为准 | ✅ |
 | 章节数 | 20 章 | ✅ |
-| Mermaid 图 | 54 张 | ✅ 已满足 |
+| Mermaid 图 | 57 张 | ✅ 已满足 |
 | 可运行代码示例 | 18 个独立工程、Python/TypeScript 共 36 个入口；包含 A2A Task/Artifact、Skill/Plugin 安装、MCP Server 管理、评估契约、模型能力契约与可插拔 Agent Host | ✅ 已验证 |
 | 简单编码任务闭环 | 受限工作区内读取/搜索 → Patch → 测试 → 结果汇报；覆盖默认拒绝和路径越界 | ✅ 双语言纵向切片已验证；生产沙箱不在教学实现范围内 |
 | 多轮对话身份闭环 | Session 聚合 Message；每条用户消息创建独立 Task/Run；历史经裁剪进入新 Run | ✅ 双语言 Application 层契约已验证 |

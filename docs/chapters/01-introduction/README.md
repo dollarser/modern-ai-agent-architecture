@@ -17,6 +17,7 @@
 4. 建立 Agent 核心概念之间的关系地图
 5. 区分常见混淆概念（Prompt vs Instructions、Skill vs Tool、Tool vs MCP 等）
 6. 理解 Prompt、Context、Tool、Workflow、Harness、Loop 与 Agentic Engineering 的关注面
+7. 区分开发框架/SDK、个人 AI 助理与 Code Agent 的产品边界
 
 ---
 
@@ -32,9 +33,9 @@
 
 ### 1.1 为什么需要 AI Agent
 
-2022 年底 ChatGPT 的发布标志着大语言模型（LLM）从实验室走向大众。然而，早期的 LLM 应用存在一个根本性局限：它们只能做「输入 → 输出」的线性文本生成，无法与外部世界交互。
+2022 年底 ChatGPT 的发布标志着大语言模型（LLM）从实验室走向大众。然而，早期的 LLM 应用主要表现为「输入 → 输出」的文本生成，模型本身不会自动访问外部系统或承担执行责任。
 
-想象一下，你让一个 LLM 帮你查询今天的天气。它可能会生成一段看起来合理的回答，但无法真正调用天气 API 获取实时数据。这就是 LLM 的「知识边界」问题——模型的知识截止于训练数据，无法获取实时信息，也无法执行具体操作。
+想象一下，你让一个 LLM 帮你查询今天的天气。除非应用显式提供搜索或天气工具，否则模型无法保证获取实时数据，也不会自动执行 API 调用。这既是模型知识边界问题，也是执行边界问题：联网、身份、权限和副作用都由 Host/Runtime 负责。
 
 **AI Agent 的出现正是为了解决这个问题。** Agent 不仅能够「思考」，还能「行动」——调用工具、查询数据库、操作文件系统，并基于执行结果调整后续决策。
 
@@ -42,23 +43,23 @@
 
 ### 1.2 什么是 AI Agent
 
-AI Agent 是一个能够自主感知环境、推理、规划并执行动作的 AI 系统。其核心特征是：
+本书将 AI Agent 定义为：能够在目标、上下文、模型输出和工具结果的基础上，动态决定下一步动作的模型驱动系统。它可以高度自治，也可以被 Workflow、Policy、Approval、预算和人工监督严格约束。其常见特征是：
 
-1. **自主性（Autonomy）：** 能够独立做出决策，无需人类逐步指导
-2. **反应性（Reactivity）：** 能够感知环境变化并做出响应
-3. **主动性（Pro-activeness）：** 能够主动采取行动以实现目标
-4. **社交能力（Social Ability）：** 能够与其他 Agent 或人类交互
+1. **动态决策（Dynamic Decision）：** 下一步路径可以由模型根据当前状态选择
+2. **工具交互（Tool Interaction）：** 可以提出结构化动作请求，由外部运行时执行
+3. **状态延续（State Continuity）：** 可以在 Run、Session 或 Task 范围内保留和恢复状态
+4. **受控自治（Bounded Autonomy）：** 行动始终受权限、预算、审批、沙箱和停止条件约束
 
-> **来源类型：** Fact —— 基于 Wooldridge & Jennings (1995) 的 Agent 定义框架，结合现代 LLM-based Agent 的实践
+> **来源类型：** 经典定义 + 作者工作定义 —— Wooldridge & Jennings (1995) 适合解释传统 Agent 属性；现代 LLM Agent 的工程定义还需要加入模型决策、工具边界和受控自治。不要把“主动性”和“长期记忆”当作所有 Agent 的必备条件。
 
 ### 1.3 Agent 与传统 LLM 应用的区别
 
 | 维度 | 典型单轮 LLM 应用 | 带执行循环的 Agent |
 |------|-------------------|--------------------|
-| 流程 | 应用显式编排输入 → 输出，通常单轮完成 | 在步数、预算与权限边界内循环：推理 → 规划 → 执行 → 观察 |
+| 流程 | 应用显式编排输入 → 输出，或使用固定 Workflow | 在步数、预算与权限边界内循环：决策 → 工具/委派/提问 → 观察 → 再决策 |
 | 工具使用 | 可由应用显式调用 Tool，但模型通常不参与循环决策 | 可根据当前上下文提出或选择 Tool 调用，并读取结果继续决策 |
 | 状态 | 应用按需传入当前上下文或状态 | 可显式管理会话状态、任务状态与长期记忆；并非所有 Agent 都需要长期记忆 |
-| 决策 | 单次生成或固定工作流 | 多步骤决策、规划或受控工作流 |
+| 决策 | 单次生成或固定工作流 | 模型可以动态选择下一步，但不等于无限自主 |
 | 自主性 | 路径主要由应用代码固定 | 路径可由模型/策略在受限能力范围内调整，关键动作仍应由应用控制 |
 
 ---
@@ -74,9 +75,11 @@ AI Agent 是一个能够自主感知环境、推理、规划并执行动作的 A
 | Prompt | 当前任务目标 | 任务开始时读取 |
 | Instructions | 跨任务的行为规则与约束 | 由 Host 按配置版本在执行前注入 |
 | Skills | 可复用工作流模板 | Agent 判断匹配时读取，不真正调用 |
-| Tools | 可执行的执行接口 | Planning 完成后调用 |
+| Tools | 可执行的执行接口 | Decision 获准后由 Runtime 调用 |
 | Built-in Tool | Agent 自带能力 | 无需安装，直接调用 |
 | MCP | 连接外部 Tool、Resource、Prompt 等能力的互操作协议 | Host 需要标准化接入外部能力时使用；不要求动态发现 |
+| A2A | 独立 Agent 之间交换能力、任务、状态和产物的互操作协议 | 需要跨 Agent 委派或协作时使用 |
+| ACP | Agent 与 IDE、CLI 或其他客户端之间的交互协议 | 需要把 Agent 接入多种开发客户端时使用 |
 | Connector | 面向 GitHub、Drive 等具体产品的集成配置与适配 | 需要管理服务身份、授权范围、端点和数据映射时使用 |
 | Plugin | 可安装、版本化和启停的一组 Host 扩展 | 需要分发 Tool、Skill、Hook、Connector 预设等能力时使用 |
 | Subagent | 由上层 Agent 委派、拥有受限上下文与预算的 Agent Run | 任务适合隔离、并行或专业化处理时运行 |
@@ -99,6 +102,11 @@ AI Agent 是一个能够自主感知环境、推理、规划并执行动作的 A
 | Plugin vs Skill/Tool | Plugin 是分发与生命周期单元；Skill 和 Tool 是它可以贡献的能力 |
 | Expert vs Subagent | Expert Profile 描述专业角色；Subagent 描述一次由父 Agent 委派的运行关系 |
 | Tool vs Function Calling | Tool 是能力抽象，Function Calling 是调用方式/协议 |
+| MCP vs A2A | MCP 连接 Host/Client 与外部能力；A2A 连接独立 Agent 并管理跨 Agent Task |
+| A2A vs ACP | A2A 面向 Agent-to-Agent 协作；ACP 面向 Agent 与客户端/编辑器之间的交互 |
+| Framework/SDK vs Agent | Framework/SDK 提供构建、编排和运行支持；Agent 是一次配置后的运行主体 |
+| Personal Assistant vs Code Agent | Personal Assistant 围绕用户、会话、主动触发和多渠道服务；Code Agent 围绕工作区、代码变更、测试和审查 |
+| Agent vs Agent Host | Agent 负责目标导向的决策；Host 提供身份、状态、工具、权限、沙箱和生命周期治理 |
 
 > **来源类型：** 推导分析 —— 基于对主流框架中这些概念的实际使用方式的归纳
 
@@ -109,19 +117,35 @@ AI Agent 是一个能够自主感知环境、推理、规划并执行动作的 A
 ### 3.1 演进路径总览
 
 ```mermaid
-flowchart TD
-    A[LLM] --> B[Prompt Engineering]
-    B --> E[ReAct]
-    E --> C[Function Calling]
-    C --> D[OpenAI Plugins]
-    D --> F[Tool Calling]
-    F --> G[Agent Runtime]
-    G --> H[Memory]
-    H --> I[MCP]
-    I --> J[Modern Coding Agent]
+flowchart TB
+    subgraph Model[模型与决策范式]
+        direction LR
+        LLM[LLM] --> Prompt[Prompt / Context]
+        Prompt --> ReAct[ReAct / Tool Use]
+        ReAct --> Reasoning[Reasoning Models]
+    end
+    subgraph System[系统工程能力]
+        direction LR
+        Runtime[Runtime / SDK] --> State[Session / Memory / Checkpoint]
+        State --> Harness[Harness / Sandbox / Verification]
+    end
+    subgraph Interop[互操作协议]
+        direction LR
+        FC[Function Calling] --> MCP[MCP]
+        MCP --> A2A[A2A / Agent Interoperability]
+    end
+    subgraph Products[应用形态]
+        direction LR
+        Chat[Chat Application] --> Workflow[Agentic Workflow]
+        Workflow --> Assistant[Personal Assistant]
+        Workflow --> Code[Code Agent]
+    end
+    Model -.提供决策能力.-> System
+    System -.承载.-> Products
+    Interop -.连接能力与主体.-> System
 ```
 
-> **图 1-1：** AI Agent 历史演进时间线
+> **图 1-1：** AI Agent 的四条并行演进线。箭头表示影响关系，不表示严格的技术替代或单一年代顺序；MCP/A2A 属于互操作层，个人助理和 Code Agent 属于应用形态。
 
 ### 3.2 阶段一：LLM（2020-2022）
 
@@ -130,12 +154,12 @@ flowchart TD
 **核心突破：** 证明了 Scaling Law——更大的模型、更多的数据、更多的算力可以带来可预测的能力提升。
 
 **局限性：**
-- 无法获取实时信息
-- 无法执行具体操作
+- 模型本身不会自动获取实时信息
+- 模型本身不会执行外部副作用
 - 输出不可控（幻觉问题）
 - 知识截止于训练数据
 
-**对现代 Agent 的影响：** LLM 是 Agent 的「大脑」，为后续所有发展奠定了基础。没有强大的推理能力，Agent 就无法做出合理的决策。
+**对现代 Agent 的影响：** LLM 提供生成和决策能力，但 Agent 的可靠性还取决于 Host、Tool、Context、Policy、State 和验证器。“模型是大脑”只是教学比喻，不代表模型单独拥有执行能力。
 
 > **来源类型：** Fact —— 基于 GPT-3 论文 (Brown et al., 2020) 和 Scaling Law 论文 (Kaplan et al., 2020)
 
@@ -267,15 +291,56 @@ flowchart TD
 
 > **来源类型：** Fact —— 基于 MCP 官方规范 (modelcontextprotocol.io)
 
-### 3.10 阶段九：Modern Coding Agent（2025-2026）
+### 3.10 阶段九：Agent-to-Agent 互操作（2025-至今）
+
+**出现原因：** 当 Agent 需要跨团队、框架或供应商协作时，仅连接 Tool 和数据源还不够，还需要表达 Agent 能做什么、任务处于什么状态以及最终产物如何交付。
+
+**核心突破：**
+- 用 Agent Card 描述能力、接口和安全要求
+- 用 Task、Message、Artifact 表达异步任务、消息和产物
+- 支持流式更新、输入补充、取消和长时间运行
+- 保留 Agent 内部实现的不透明性，不要求共享内部推理或 Tool 实现
+
+**边界：** A2A 与 MCP 不是上下位替代关系。MCP 主要连接 Host/Client 与外部上下文和能力，A2A 主要连接独立 Agent。两者可以在同一系统中同时使用。
+
+> **来源类型：** Fact —— 基于 [A2A 官方规范](https://github.com/a2aproject/A2A/blob/main/docs/specification.md)。协议版本、绑定方式和具体实现应以规范版本为准。
+
+### 3.11 阶段十：个人 AI 助理（2024-至今）
+
+个人 AI 助理不是“更会聊天的 Agent”，而是围绕一个用户长期运行的 Host。它通常把会话、身份、多渠道入口、主动触发、个人数据、记忆和审批放在一起。
+
+**常见架构：**
+
+```text
+用户 / 消息渠道 / 定时器 / Webhook
+              ↓
+       Assistant Host
+   Session · Memory · Identity
+   Trigger · Policy · Approval
+              ↓
+      Tools / Connectors / MCP
+              ↓
+        外部服务与设备
+```
+
+**工程重点：**
+- “主动执行”必须有 Trigger、频率限制、幂等键和取消入口
+- 个人数据需要按用户、设备、会话和租户隔离
+- 长期记忆应区分事实、偏好、任务状态和临时上下文，并支持删除与纠错
+- 多渠道消息不能直接等同于可靠的任务队列；长任务应使用 Task/Run 状态和可恢复存储
+
+Open WebUI 展示了自托管、本地/远程模型、RBAC、工具、Skill、MCP 和审批等个人/团队入口的组合；Open Interpreter 则展示了本地终端、Harness、计算机操作和 ACP 互操作的另一种形态。[Open WebUI](https://github.com/open-webui/open-webui)、[Open Interpreter](https://github.com/openinterpreter/openinterpreter)
+
+### 3.12 阶段十一：Code Agent 与 Harness Engineering（2024-至今）
 
 **出现原因：** 将 Agent 架构应用于软件开发领域，出现了 GitHub Copilot、Claude Code、Cursor、Continue 等 Coding Agent，它们代表了 Agent 架构的最前沿实践。
 
 **核心特征：**
-- 深度集成 IDE 和开发工具链
-- 完整的 Agent 架构（Runtime + Planner + Tool Registry + Memory + MCP）
-- Skills 和 Hooks 系统
-- 企业级的安全和权限控制
+- 工作区、仓库、分支或 Worktree 是一等运行资源
+- 文件读取、补丁编辑、终端、测试、浏览器等工具组成 Agent-Computer Interface
+- Harness 提供上下文组装、工具循环、沙箱、超时、审批和反馈
+- Git diff、编译、测试、Lint、评审和 CI 充当外部验证器
+- 长任务需要 Checkpoint、恢复、取消、日志和产物归档
 
 **当前挑战：**
 - 代码生成的准确性和可靠性
@@ -283,9 +348,24 @@ flowchart TD
 - 安全性和权限控制
 - 用户信任和采纳
 
-**对未来的影响：** Coding Agent 是 Agent 架构的「实验场」，许多设计模式（如 Skills、Hooks、MCP）首先在 Coding Agent 中得到验证，然后推广到更广泛的 Agent 应用场景。
+**对未来的影响：** Code Agent 把 Agent 的关键问题从“能否生成代码”推进到“能否在受控工作区中完成、验证并交付变更”。OpenHands、SWE-agent、Aider 和 Cline 分别体现了 Agent Server/沙箱、Agent-Computer Interface、Git 协作、测试反馈、人机审批以及 SDK/CLI/IDE 多形态等实践。[OpenHands](https://github.com/OpenHands/OpenHands)、[SWE-agent](https://github.com/SWE-agent/SWE-agent)、[Aider](https://aider.chat/docs/)、[Cline](https://github.com/cline/cline)
 
-> **来源类型：** 推导分析 —— 基于 GitHub Copilot、Claude Code、Cursor 的公开文档和架构分析
+> **来源类型：** 推导分析 —— 基于 GitHub Copilot、Claude Code、Cursor、OpenHands、SWE-agent、Aider 和 Cline 的公开文档与源码；不同产品并不共享一套固定内部架构。
+
+### 3.13 开发框架与 SDK 的共同抽象
+
+主流框架/SDK 的价值不只是封装模型 API，而是把 Agent 的可变决策放进可测试、可观测、可恢复的运行边界。常见抽象包括：
+
+| 抽象 | 要解决的问题 |
+|---|---|
+| Agent / Graph / Workflow | 谁决定下一步，哪些路径由代码固定 |
+| Runner / Runtime | 如何运行一轮或多轮决策、工具和委派 |
+| Session / State / Checkpoint | 如何延续、暂停、恢复和回放 |
+| Tool / Dependency / Output Contract | 如何限制输入、注入依赖并校验输出 |
+| Guardrail / Callback / Middleware | 如何观察、阻止、修改或审批动作 |
+| Trace / Eval | 如何解释一次运行并比较质量、成本和安全性 |
+
+OpenAI Agents SDK、LangGraph、Google ADK 和 Pydantic AI 的公开文档分别体现了 Runner/Turn、图状态与持久化、Session/Memory/A2A、类型校验与评估等不同侧重。[OpenAI Agents SDK](https://openai.github.io/openai-agents-python/agents/)、[LangGraph Persistence](https://docs.langchain.com/oss/python/langgraph/persistence)、[Google ADK](https://adk.dev/)、[Pydantic AI](https://github.com/pydantic/pydantic-ai)
 
 ---
 
@@ -294,7 +374,7 @@ flowchart TD
 现代 Agent 工程不能只用一条更长的 Prompt 解释。随着系统开始调用外部能力、维护状态、接受反馈并跨 Run 工作，工程对象逐步扩大；这不是后一项技术淘汰前一项技术，而是多组可以组合的实践。
 
 ```mermaid
-flowchart LR
+flowchart TB
     Prompt["Prompt Engineering<br/>设计任务表达"] --> Tool["Tool Engineering<br/>设计结构化行动"]
     Prompt --> Context["Context Engineering<br/>设计模型可见信息"]
     Tool --> Workflow["Workflow Engineering<br/>设计控制流"]
@@ -493,7 +573,7 @@ Agent 执行过程:
 
 ### Q: Agent 和聊天机器人有什么区别？
 
-聊天机器人是 Agent 的一种简化形式。聊天机器人通常只有「输入 → 推理 → 输出」的线性流程，而 Agent 具有完整的推理-规划-执行-观察循环，可以调用工具、管理记忆、处理多步骤任务。
+聊天机器人是交互形态，不一定对应某种内部架构。一个聊天产品可以只是「输入 → 输出」，也可以承载 Workflow 或 Agent。判断标准不是界面是否像聊天，而是下一步路径由代码固定还是由模型在受控边界内动态决定。
 
 ### Q: 为什么需要从 LLM 演进到 Agent？
 
@@ -505,7 +585,15 @@ Agent 的自主性是有边界的。虽然 Agent 可以自主决策，但通常�
 
 ### Q: MCP 会取代 Function Calling 吗？
 
-不会。MCP 是 Tool 提供协议，Function Calling 是 Tool 调用机制。MCP 解决了「如何发现和提供 Tool」的问题，Function Calling 解决了「如何调用 Tool」的问题。两者是互补关系，而非替代关系。
+不会。Function Calling 是模型向应用提出结构化动作请求的调用机制；MCP 是 Host/Client 与外部 Server 交换 Tool、Resource、Prompt 和能力信息的互操作协议。MCP Server 可以提供 Tool，但 MCP 不等于 Tool Calling。A2A 进一步解决独立 Agent 之间的任务和产物协作问题。
+
+### Q: 个人 AI 助理和 Code Agent 是同一种 Agent 吗？
+
+它们可以共享 Agent Runtime，但优化目标不同。个人助理重点是用户身份、长期会话、主动触发、多渠道和个人数据治理；Code Agent 重点是工作区、代码工具、沙箱、版本控制、测试验证和变更交付。不要因为两者都能调用 Tool，就把它们的 Host 设计完全等同。
+
+### Q: 开发框架或 SDK 本身是不是 Agent？
+
+不是。框架/SDK 提供 Agent、Tool、Runner、Graph、Session、Tracing 和 Guardrail 等构建与运行抽象；Agent 是使用这些抽象配置出的运行主体，Host 则负责身份、资源、策略和生命周期治理。
 
 ### Q: 学习 Agent 架构需要什么基础？
 
@@ -525,6 +613,12 @@ Agent 的自主性是有边界的。虽然 Agent 可以自主决策，但通常�
 | REF-6 | [Anthropic: Building Effective Agents](https://www.anthropic.com/research/building-effective-agents) | 官方文章 | Workflow 与 Agent 的边界 |
 | REF-7 | [OpenAI: Harness Engineering](https://openai.com/index/harness-engineering/) | 官方工程文章 | Agent 环境、意图和反馈系统的公开实践 |
 | REF-8 | [Stop Hand-Holding Your Coding Agent](https://arxiv.org/abs/2607.00038) | 预印本 | Loop Engineering 新兴术语、循环规范与局限；不作为统一标准 |
+| REF-9 | [A2A Protocol Specification](https://github.com/a2aproject/A2A/blob/main/docs/specification.md) | 开源协议规范 | Agent Card、Task、Message、Artifact 与异步协作 |
+| REF-10 | [OpenHands](https://github.com/OpenHands/OpenHands) | 开源项目 | Agent Server、工作区、自动化和多后端 Code Agent |
+| REF-11 | [SWE-agent](https://github.com/SWE-agent/SWE-agent) | 开源项目 / 论文 | Agent-Computer Interface 与仓库级软件工程任务 |
+| REF-12 | [Cline](https://github.com/cline/cline) | 开源项目 | CLI、IDE、SDK、多 Agent 和人工审批 |
+| REF-13 | [Open WebUI](https://github.com/open-webui/open-webui) | 开源项目 | 自托管模型、RBAC、Tool、Skill、MCP 和个人/团队入口 |
+| REF-14 | [Pydantic AI](https://github.com/pydantic/pydantic-ai) | 开源框架 | 类型安全、依赖注入、评估、可观测性和能力组合 |
 
 ---
 

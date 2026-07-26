@@ -365,7 +365,7 @@ Guardrails 不是只在 System Prompt 中写一条“请遵守规则”，而是
 #### 统一安全控制链
 
 ```mermaid
-flowchart LR
+flowchart TB
     Request["Agent Tool Request"] --> Guard["Input Guardrail<br/>参数与内容检查"]
     Guard --> Policy["Policy Engine<br/>allow / ask / deny"]
     Policy -->|deny| Reject["结构化拒绝"]

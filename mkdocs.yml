@@ -99,16 +99,16 @@ nav:
     - 第11章 Tool Registry：工具注册与调度: chapters/11-tool-registry/README.md
   - 第四部分 扩展与互操作:
     - 第12章 Skills：可复用工作流: chapters/12-skills/README.md
-    - 第13章 MCP：模型上下文协议: chapters/13-mcp/README.md
+    - 第13章 MCP 与 Agent 互操作协议: chapters/13-mcp/README.md
     - 第14章 Plugin 体系: chapters/14-plugin-system/README.md
   - 第五部分 规模化与生产:
     - 第15章 Agent 设计模式: chapters/15-design-patterns/README.md
     - 第16章 Agent Host 与场景组装: chapters/16-agent-host/README.md
     - 第17章 工程实践与生产部署: chapters/17-engineering-practice/README.md
     - 第18章 最佳实践、评估与反模式: chapters/18-best-practices/README.md
-  - 第六部分 案例与索引:
-    - 第19章 主流框架架构分析: chapters/19-framework-analysis/README.md
-    - 第20章 常见架构问题与选型指南: chapters/20-faq/README.md
+  - 第六部分 案例、选型与索引:
+    - 第19章 主流框架与开源项目架构分析: chapters/19-framework-analysis/README.md
+    - 第20章 架构选型、迁移与常见问题: chapters/20-faq/README.md
   - 附录:
     - 架构图索引: mermaid/ArchitectureIndex.md
     - Mermaid 图索引: mermaid/MermaidIndex.md

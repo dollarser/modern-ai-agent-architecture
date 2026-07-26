@@ -1,6 +1,6 @@
 # 第 15 章：Agent 设计模式
 
-> **维护边界：** 本章负责模式选择与组合取舍。Planner 的机制以第 5 章为唯一正文来源，Hook 的生命周期机制以第 10 章为唯一正文来源；本章只引用并比较，不复制实现细节。
+> **维护边界：** 本章负责模式选择与组合取舍。Planner 的机制以第 5 章为唯一正文来源，Hook 的生命周期机制以第 10 章为唯一正文来源，MCP/A2A 协议事实以第 13 章为唯一正文来源；本章只讨论 Handoff、Multi-Agent 和跨系统模式，不复制协议字段和生命周期定义。
 > **难度等级：** ⭐⭐⭐⭐
 > **所属模块：** 第五部分：规模化与生产
 > **来源可信度：** 官方文档 / 论文 / 推导 / 观点
@@ -397,6 +397,8 @@ Profile 合并建议采用“默认值 → 组织策略 → 项目配置 → 本
 
 ### 6.5 本地 Handoff 与跨系统 A2A
 
+> **阅读边界：** 本节只回答“什么时候从本地 Handoff 升级为跨系统协作、如何设计委派边界”。A2A 的 Agent Card、Task、Message、Artifact、状态和版本语义见第 13 章的“A2A：Agent-to-Agent 互操作”一节。
+
 Handoff 解决的是同一 Host 或同一应用内部的控制权转移；当协作方属于不同团队、不同运行时或不同信任边界时，还需要约定发现、任务状态、结果交付与身份验证。A2A（Agent-to-Agent）等跨 Agent 协议尝试解决这一层互操作，但它们不替代 Tool 协议，也不替代本地的委派契约。
 
 | 问题 | 本地 Handoff | 跨系统 A2A 式协作 |
@@ -421,26 +423,18 @@ Handoff 解决的是同一 Host 或同一应用内部的控制权转移；当协
 
 > **来源类型：** Fact + 推导分析 —— 参考 [A2A Protocol](https://a2aproject.github.io/A2A/latest/specification/) 与 [Agent Client Protocol](https://github.com/agentclientprotocol/agent-client-protocol) 的公开定位；具体协议版本和实现能力应以官方规范为准
 
-### 6.6 A2A 的最小任务契约
+### 6.6 A2A 委派模式决策
 
-A2A 不只是“把 Agent 暴露成一个 HTTP 接口”。它把跨系统协作拆成发现、任务跟踪、消息交互和结果交付四个可独立验证的部分。最小模型如下：
+A2A 不只是“把 Agent 暴露成一个 HTTP 接口”。在模式层面，应把跨系统协作拆成发现、任务跟踪、消息交互和结果交付四个可独立验证的边界；具体对象、字段和状态机以第 13 章为准。
 
-| 对象 | 作用 | 本书中的对应边界 |
-|------|------|------------------|
-| Agent Card | 描述身份、能力、技能、端点和认证要求 | Catalog / Connector / Policy |
-| Message | 发起任务、补充信息或请求澄清 | Application / Session |
-| Task | 跨请求持续存在的工作单元 | Task / Run 的协议投影 |
-| Artifact | 任务产生的文件、结构化数据或其他交付物 | Artifact Store |
-| Status Update | 报告进度、等待输入、失败或完成 | Event Bus / Trace |
+| 模式决策 | 本地 Handoff | A2A 委派 |
+|----------|--------------|----------|
+| 适用边界 | 同一 Host、同一信任域 | 不同 Host、团队或信任域 |
+| 主要代价 | 共享运行时状态的耦合 | 序列化、认证、异步状态与版本兼容 |
+| 设计重点 | 能力快照、预算、取消和结果契约 | Agent 发现、Task 生命周期、Artifact 交付和重试幂等 |
+| 正文来源 | 本章的 Handoff/Runner 讨论 | 第 13 章的 A2A 协议模型 |
 
-跨系统调用至少应验证以下不变量：
-
-1. Agent Card 的来源、版本和认证要求在调用前可验证；
-2. 每个远程 Task 都绑定调用方、租户、权限和过期时间；
-3. `working`、`input-required`、`completed`、`failed`、`canceled` 等状态不会被直接等同为“最终成功”；
-4. 大型结果通过 Artifact 引用交付，而不是无限追加到消息历史；
-5. Streaming、Polling 和 Push Notification 只是不同的更新传输方式，不改变任务状态机；
-6. 重试和恢复使用幂等键，不能因为网络超时重复执行不可逆副作用。
+选择 A2A 前至少验证四个模式不变量：调用目标可发现且可认证，远程 Task 绑定调用方和租户，结果通过受控 Artifact 交付，重试不会重复不可逆副作用。Streaming、Polling 和 Push 只是更新传输方式，不改变这些边界。
 
 一个 Host 可以把本地 `Subagent` 适配为 A2A Client，也可以把自身的 `AgentHost` 暴露为 A2A Server，但两种方向都必须重新执行本地 Policy。远程 Agent 声称“支持某个 Skill”不等于本地用户已批准该能力。
 

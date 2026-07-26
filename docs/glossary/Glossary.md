@@ -10,6 +10,7 @@
 | Agent Run | Agent Run | Agent 对某个 Task 的一次有独立 ID、预算、状态和终态的执行尝试；重试通常创建新 Run |
 | Agent Host | Agent Host | 运行 Agent 的应用宿主，提供 Runtime、Policy、Registry、Checkpoint、Sandbox 与扩展生命周期；本身不是 Agent |
 | A2A | Agent-to-Agent | 面向跨系统 Agent 协作的互操作协议类别；与应用内 Handoff 和 MCP 的职责不同 |
+| Agent Card | Agent Card | A2A 中描述远程 Agent 身份、能力、入口和认证要求的可发现元数据；不等于权限授予 |
 | Agent Loop | Agent Loop | Agent 的主循环：Reasoning → Planning → Tool Calling → Observation → Reasoning ... |
 | Agent Runtime | Agent Runtime | 管理 Agent 生命周期、调度 Tool 调用、协调各组件的运行环境 |
 | Agentic Workflow | Agentic Workflow | 在确定性 Workflow 边界内嵌入有限 Agent 决策节点的混合架构 |
