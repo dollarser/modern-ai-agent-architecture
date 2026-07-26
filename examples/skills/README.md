@@ -11,4 +11,12 @@ python main.py --root .agent/skills list
 python main.py --root .agent/skills remove skill-name
 ```
 
+TypeScript 契约测试：
+
+```bash
+cd ../typescript
+npm ci
+npm test
+```
+
 当前只支持可信本地目录。Git 下载、签名、远程市场和沙箱属于生产扩展，不在此离线示例中。

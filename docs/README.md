@@ -102,7 +102,7 @@ npm run start
 |------|------|------|
 | 正文字量 | 以结构完整、可导航、无明显重复和可维护为准 | ✅ |
 | 章节数 | 20 章 | ✅ |
-| Mermaid 图 | 54 张 | ✅ 已满足 |
+| Mermaid 图 | 57 张 | ✅ 已满足 |
 | 可运行代码示例 | 18 个独立工程、Python/TypeScript 共 36 个入口；包含 A2A Task/Artifact、Skill/Plugin 安装、MCP Server 管理、评估契约、模型能力契约与可插拔 Agent Host | ✅ 已验证 |
 | 简单编码任务闭环 | 受限工作区内读取/搜索 → Patch → 测试 → 结果汇报；覆盖默认拒绝和路径越界 | ✅ 双语言纵向切片已验证；生产沙箱不在教学实现范围内 |
 | 多轮对话身份闭环 | Session 聚合 Message；每条用户消息创建独立 Task/Run；历史经裁剪进入新 Run | ✅ 双语言 Application 层契约已验证 |

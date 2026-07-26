@@ -1,13 +1,13 @@
 # 当前实现与出版基线
 
-> **快照日期：** 2026-07-13。动态事实以自动化检查、`docs/SUMMARY.md` 和当前代码为准；修改数量或能力后必须同步本文件。
+> **快照日期：** 2026-07-26。动态事实以自动化检查、`docs/SUMMARY.md` 和当前代码为准；修改数量或能力后必须同步本文件。
 
 ## 内容规模
 
 | 项目 | 当前基线 |
 |---|---:|
 | 章节 | 20 章，六部分 |
-| Mermaid | 54 张，索引与正文一致 |
+| Mermaid | 57 张，索引与正文一致 |
 | 示例工程 | 18 个 |
 | Python/TypeScript 入口 | 36 个 |
 | Python 测试 | 12 个工程、55 项 |
@@ -60,5 +60,5 @@ ConversationApplication
 
 - P0/P1 必须为 0。
 - P2 必须修复或在审查报告记录明确取舍。
-- MkDocs strict build、内部链接、54 张 Mermaid、全部 Python 测试、全部 TypeScript build/test 和 `git diff --check` 必须通过。
+- MkDocs strict build、内部链接、57 张 Mermaid、全部 Python 测试、全部 TypeScript build/test 和 `git diff --check` 必须通过。
 - 冻结后不再增加外围模块，只接受事实、安全、可运行性、图文一致性和必要出版润色修订。
