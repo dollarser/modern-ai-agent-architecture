@@ -4,14 +4,14 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/) 规范。
 
-## [Unreleased] - 2026-07-24
+## [1.0.0] - 2026-07-26
 
 - 根据 2026 年 Agent 工程趋势复核全书：统一 MCP v2025-11-25 事实基线，补充 A2A 最小任务契约、异步 Task 与 Artifact 交付、扩展供应链治理，以及 Trace 到评估结果的映射。
 - 修正第 19 章框架数量表述和 Mermaid 索引，补充 A2A 与 OpenTelemetry GenAI 参考文献。
 
 ### 最终版定位
 - 冻结最终学习成果：兼顾 AI Agent 概念、理论与开发，并以可对话、可安装扩展、可完成简单编码任务的教学型 Agent Host 为落点。
-- 新增最终版出版审查基线与验收矩阵；当时识别的 Patch/测试闭环和 Application Session → Run 两项 P1 已在本版本后续修复并通过双语言测试。
+- 新增最终版出版审查基线与验收矩阵；Patch/测试闭环和 Application Session → Run 两项 P1 已在 1.0.0 发布前修复并通过双语言测试。
 - 为 Agent Host 新增 Python/TypeScript 对等的受限 Coding Agent：工作区 Read/Search、需审批的精确 Patch、固定 argv 测试与结果汇报；覆盖默认拒绝和路径越界。
 - 新增 Python/TypeScript 对等的 `ConversationApplication + JsonSessionStore`，实现 Session 多轮消息到独立 Task/Run 的映射，并将受限历史显式传入新 Run 的 Planner Context。
 - 完成执行、状态、扩展、协作、治理与工程实践六条纵向主线终审；统一 Task 级重试与 Tool 重试、Policy 身份、扩展阶段、审批状态和 Plugin 清理失败语义。
