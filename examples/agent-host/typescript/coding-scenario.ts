@@ -1,8 +1,10 @@
 /** 受限工作区 Coding Agent 教学场景。 */
 
+import { atomicWriteText } from "./safe-io.js"
+import { sha256Text } from "./governance.js"
 import { execFile } from "node:child_process"
 import {
-  readFileSync, readdirSync, realpathSync, renameSync, statSync, writeFileSync,
+  readFileSync, readdirSync, realpathSync, statSync,
 } from "node:fs"
 import { relative, resolve, sep } from "node:path"
 import {
@@ -106,19 +108,22 @@ export const installCodingTools = (host: AgentHost, workspace: Workspace): void 
   })
   host.tools.register({
     name: "apply_patch", description: "精确替换一次文本", tags: ["write"], requiresApproval: true,
+    prepare: (arguments_) => {
+      const target = workspace.resolve(String(arguments_.path))
+      return { target, beforeHash: sha256Text(readFileSync(target, "utf8")) }
+    },
     handler: (arguments_) => {
       const path = workspace.resolve(String(arguments_.path))
       const oldText = String(arguments_.old), newText = String(arguments_.new)
       const content = readFileSync(path, "utf8")
       if (content.split(oldText).length !== 2) return { success: false, error: "补丁旧文本必须且只能匹配一次" }
-      const temporary = `${path}.tmp`
-      writeFileSync(temporary, content.replace(oldText, newText), "utf8")
-      renameSync(temporary, path)
+      atomicWriteText(path, content.replace(oldText, newText), true)
       return { success: true, path: String(arguments_.path), changed: true }
     },
   })
   host.tools.register({
     name: "run_check", description: "运行预注册检查", tags: ["execute"], requiresApproval: true,
+    prepare: () => ({ workspace: workspace.root, command: [process.execPath, "--test"] }),
     handler: (arguments_) => arguments_.check === "unit"
       ? runUnitCheck(workspace)
       : { success: false, error: "检查命令不在白名单" },

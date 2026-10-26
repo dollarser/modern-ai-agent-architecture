@@ -329,7 +329,7 @@ flowchart TB
 - 长期记忆应区分事实、偏好、任务状态和临时上下文，并支持删除与纠错
 - 多渠道消息不能直接等同于可靠的任务队列；长任务应使用 Task/Run 状态和可恢复存储
 
-Open WebUI 展示了自托管、本地/远程模型、RBAC、工具、Skill、MCP 和审批等个人/团队入口的组合；Open Interpreter 则展示了本地终端、Harness、计算机操作和 ACP 互操作的另一种形态。[Open WebUI](https://github.com/open-webui/open-webui)、[Open Interpreter](https://github.com/openinterpreter/openinterpreter)
+Open WebUI 展示了自托管、本地/远程模型、RBAC、工具、Skill 和 MCP 等个人/团队入口的组合；Open Interpreter 则展示了本地终端、Harness、计算机操作和 ACP 互操作的另一种形态。动作审批是否存在及其粒度属于高变化产品事实，选型时应单独核查，不能由普通确认 UI 推断。[Open WebUI](https://github.com/open-webui/open-webui)、[Open Interpreter](https://github.com/openinterpreter/openinterpreter)
 
 ### 3.12 阶段十一：Code Agent 与 Harness Engineering（2024-至今）
 
@@ -385,7 +385,7 @@ flowchart TB
     Loop --> Agentic["Agentic Engineering<br/>生产工程总框架"]
 ```
 
-> **图 1-4：** Agent 工程关注面的扩展。箭头表示系统责任扩大和依赖关系，不是技术替代或业界公认的线性年代划分；Prompt、Context、Tool、Workflow、Harness 与 Loop 在生产系统中通常同时存在。
+> **图 1-2：** Agent 工程关注面的扩展。箭头表示系统责任扩大和依赖关系，不是技术替代或业界公认的线性年代划分；Prompt、Context、Tool、Workflow、Harness 与 Loop 在生产系统中通常同时存在。
 
 | 工程实践 | 主要设计对象 | 典型问题 |
 |----------|--------------|----------|
@@ -420,7 +420,7 @@ flowchart TB
     Runtime --> Hooks["Guard / Observer Hooks"]
 ```
 
-> **图 1-2：** Agent 应用运行结构预览。Host 提供治理和执行环境，Agent/Subagent 是运行主体；Skill 指导主体，Tool 经 Runtime 执行。第 2 章给出完整职责边界。
+> **图 1-3：** Agent 应用运行结构预览。Host 提供治理和执行环境，Agent/Subagent 是运行主体；Skill 指导主体，Tool 经 Runtime 执行。第 2 章给出完整职责边界。
 
 ### 5.2 核心概念关系
 
@@ -437,7 +437,7 @@ flowchart TB
     Distribution -->|分发贡献项| Capability
 ```
 
-> **图 1-3：** 五类正交概念预览。它们回答“谁运行、能做什么、如何互操作、接入哪个产品、如何分发”五个不同问题；ExpertProfile 是角色配置。完整定义见第 2 章图 2-6。
+> **图 1-4：** 五类正交概念预览。它们回答“谁运行、能做什么、如何互操作、接入哪个产品、如何分发”五个不同问题；ExpertProfile 是角色配置。完整定义见第 2 章图 2-3。
 
 ---
 
@@ -445,7 +445,7 @@ flowchart TB
 
 ### 6.1 Hello Agent
 
-以下是一个最小化的 Agent 实现，展示 Agent 的核心循环：
+以下代码与 [`examples/hello-agent/python/main.py`](https://github.com/dollarser/modern-ai-agent-architecture/blob/main/examples/hello-agent/python/main.py) 保持一致，展示 Agent 的核心循环：
 
 ```python
 """
@@ -460,27 +460,31 @@ class MinimalAgent:
 
     def __init__(self, name: str):
         self.name = name
-        self.memory = []  # 简单的记忆列表
+        self.memory: list[str] = []
+        self.step_count = 0
 
     def reason(self, task: str) -> str:
         """推理阶段：分析任务"""
-        thought = f"[{self.name}] 思考: 我需要完成 '{task}'"
+        self.step_count += 1
+        thought = f"[Step {self.step_count}] [{self.name}] 思考: 我需要完成 '{task}'"
         self.memory.append(thought)
         return thought
 
     def plan(self, task: str) -> list[str]:
         """规划阶段：将任务分解为步骤"""
         steps = [
-            f"1. 理解任务: {task}",
-            "2. 确定所需工具",
+            f"1. 分析任务: {task}",
+            "2. 确定所需资源",
             "3. 执行操作",
-            "4. 检查结果",
+            "4. 验证结果",
         ]
+        plan_msg = f"[{self.name}] 规划: 制定 {len(steps)} 步计划"
+        self.memory.append(plan_msg)
         return steps
 
     def act(self, step: str) -> str:
         """执行阶段：执行具体步骤"""
-        result = f"[{self.name}] 执行: {step} -> 完成"
+        result = f"[{self.name}] 执行: {step} ✓"
         self.memory.append(result)
         return result
 
@@ -506,46 +510,50 @@ class MinimalAgent:
             result = self.act(step)
             outputs.append(self.observe(result))
 
+        outputs.append(
+            f"[{self.name}] 完成! 总步数: {self.step_count}, "
+            f"记忆条目: {len(self.memory)}"
+        )
+
         return outputs
 
 
-if __name__ == "__main__":
+def main():
     agent = MinimalAgent("HelloAgent")
     results = agent.run("向世界问好")
 
-    print("=" * 50)
-    print("Agent 执行过程:")
-    print("=" * 50)
+    print("=" * 60)
+    print("  Agent 执行过程")
+    print("=" * 60)
     for r in results:
-        print(r)
-    print("=" * 50)
-    print(f"记忆条目: {len(agent.memory)} 条")
+        print(f"  {r}")
+    print("=" * 60)
+
+
+if __name__ == "__main__":
+    main()
 ```
 
 **预期输出：**
 
 ```
-==================================================
-Agent 执行过程:
-==================================================
-[HelloAgent] 思考: 我需要完成 '向世界问好'
-1. 理解任务: 向世界问好
-2. 确定所需工具
-3. 执行操作
-4. 检查结果
-[HelloAgent] 执行: 1. 理解任务: 向世界问好 -> 完成
-[HelloAgent] 观察: [HelloAgent] 执行: 1. 理解任务: 向世界问好 -> 完成
-[HelloAgent] 执行: 2. 确定所需工具 -> 完成
-[HelloAgent] 观察: [HelloAgent] 执行: 2. 确定所需工具 -> 完成
-[HelloAgent] 执行: 3. 执行操作 -> 完成
-[HelloAgent] 观察: [HelloAgent] 执行: 3. 执行操作 -> 完成
-[HelloAgent] 执行: 4. 检查结果 -> 完成
-[HelloAgent] 观察: [HelloAgent] 执行: 4. 检查结果 -> 完成
-==================================================
-记忆条目: 9 条
+============================================================
+  Agent 执行过程
+============================================================
+  [Step 1] [HelloAgent] 思考: 我需要完成 '向世界问好'
+  1. 分析任务: 向世界问好
+  2. 确定所需资源
+  3. 执行操作
+  4. 验证结果
+  [HelloAgent] 观察: [HelloAgent] 执行: 1. 分析任务: 向世界问好 ✓
+  [HelloAgent] 观察: [HelloAgent] 执行: 2. 确定所需资源 ✓
+  [HelloAgent] 观察: [HelloAgent] 执行: 3. 执行操作 ✓
+  [HelloAgent] 观察: [HelloAgent] 执行: 4. 验证结果 ✓
+  [HelloAgent] 完成! 总步数: 1, 记忆条目: 10
+============================================================
 ```
 
-> **运行方式：** 见 `examples/hello-agent/python/main.py`
+> **运行方式：** `python examples/hello-agent/python/main.py`
 
 ---
 

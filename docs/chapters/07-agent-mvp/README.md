@@ -154,8 +154,8 @@ for call in plan:
     observation = self.tools.execute(call, state)
     state.observations.append(observation)
 
-    if not observation.get("ok", False):
-        state.error = str(observation.get("error", "tool execution failed"))
+    if not observation.get("success", False):
+        state.error = str(observation.get("error_message", "tool execution failed"))
         break
 else:
     state.finished = True

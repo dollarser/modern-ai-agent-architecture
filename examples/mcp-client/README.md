@@ -30,3 +30,7 @@ npm run start
 ## 相关章节
 - 第 13 章 MCP（Model Context Protocol）
 - 第 11 章 Tool Registry
+
+## 协议版本边界（2026-10-26）
+
+当前 MCP 正文基线为 `2026-07-28`；本示例仍是离线教学模型，没有验证新版逐请求元数据、MRTR、真实 HTTP / stdio 或旧版回退。修改版本常量不构成协议升级。生产替换须选择支持目标版本的 SDK，并分别验证版本探测、认证、取消、断流和未知副作用；参考[官方版本兼容规则](https://modelcontextprotocol.io/specification/2026-07-28/basic/versioning)。

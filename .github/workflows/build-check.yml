@@ -27,6 +27,9 @@ jobs:
         run: |
           mkdocs build --strict
 
+      - name: Verify quantitative baseline
+        run: python scripts/check_book_baseline.py .
+
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:

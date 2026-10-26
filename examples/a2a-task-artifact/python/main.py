@@ -71,6 +71,8 @@ class InMemoryA2A:
     def submit(self, task_id: str, idempotency_key: str, tenant_id: str, owner: str) -> Task:
         if idempotency_key in self._idempotency:
             return self.tasks[self._idempotency[idempotency_key]]
+        if task_id in self.tasks:
+            raise ValueError("同一 task_id 不能绑定不同幂等键")
         task = Task(task_id, f"ctx-{task_id}", tenant_id, owner)
         self.tasks[task_id] = task
         self._idempotency[idempotency_key] = task_id
@@ -116,6 +118,12 @@ class ContractTest(unittest.TestCase):
         task = server.submit("task-1", "idem-1", "tenant-a", "alice")
         server.cancel(task.task_id)
         self.assertEqual(task.status, "cancel_requested")
+
+    def test_task_id_cannot_be_rebound_to_another_idempotency_key(self) -> None:
+        server = InMemoryA2A()
+        server.submit("task-1", "idem-1", "tenant-a", "alice")
+        with self.assertRaisesRegex(ValueError, "task_id"):
+            server.submit("task-1", "idem-2", "tenant-a", "alice")
 
 
 if __name__ == "__main__":

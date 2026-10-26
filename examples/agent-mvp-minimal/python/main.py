@@ -44,14 +44,20 @@ class ToolDispatcher:
     def execute(self, call: ToolCall, state: TaskState) -> dict[str, Any]:
         handler = self._handlers.get(call.name)
         if handler is None:
-            return {"ok": False, "error": f"unknown tool: {call.name}"}
+            return {
+                "success": False,
+                "error_code": "tool_not_found",
+                "error_message": f"unknown tool: {call.name}",
+                "retryable": False,
+                "details": {"tool": call.name},
+            }
         return handler(call.arguments, state)
 
     @staticmethod
     def _search_catalog(arguments: dict[str, Any], _: TaskState) -> dict[str, Any]:
         query = str(arguments["query"])
         return {
-            "ok": True,
+            "success": True,
             "matches": [
                 {"path": "src/config.ts", "snippet": f"connection settings for: {query}"},
                 {"path": "src/db.ts", "snippet": "createConnection(config)"},
@@ -62,7 +68,7 @@ class ToolDispatcher:
     def _summarize_observation(_: dict[str, Any], state: TaskState) -> dict[str, Any]:
         previous = state.observations[-1] if state.observations else {"matches": []}
         count = len(previous.get("matches", []))
-        return {"ok": True, "summary": f"找到 {count} 条候选信息，等待用户确认下一步。"}
+        return {"success": True, "summary": f"找到 {count} 条候选信息，等待用户确认下一步。"}
 
 
 class MinimalAgent:
@@ -98,8 +104,10 @@ class MinimalAgent:
             observation = self.tools.execute(call, state)
             state.observations.append(observation)
             print(f"observe: {observation}")
-            if not observation.get("ok", False):
-                state.error = str(observation.get("error", "tool execution failed"))
+            if not observation.get("success", False):
+                state.error = str(
+                    observation.get("error_message", "tool execution failed")
+                )
                 break
         else:
             state.finished = True

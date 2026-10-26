@@ -12,6 +12,7 @@ import ast
 import math
 import operator
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable
 
 
@@ -24,6 +25,34 @@ _BINARY_OPERATORS = {
     ast.Pow: operator.pow,
 }
 _UNARY_OPERATORS = {ast.UAdd: operator.pos, ast.USub: operator.neg}
+WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
+FILE_PREVIEW_LIMIT = 500
+
+
+def failure(code: str, message: str, *, details: dict | None = None) -> dict:
+    """本书统一错误契约的最小构造器。"""
+    return {
+        "success": False,
+        "error_code": code,
+        "error_message": message,
+        "retryable": False,
+        "details": details or {},
+    }
+
+
+def validate_arguments(schema: dict, arguments: dict) -> None:
+    """覆盖本示例所用 JSON Schema 子集；生产系统应使用完整 validator。"""
+    if not isinstance(arguments, dict):
+        raise TypeError("arguments 必须是对象")
+    missing = [name for name in schema.get("required", []) if name not in arguments]
+    if missing:
+        raise TypeError(f"缺少必填参数: {', '.join(missing)}")
+    python_types = {"string": str, "integer": int, "number": (int, float)}
+    for name, value in arguments.items():
+        expected = schema.get("properties", {}).get(name, {}).get("type")
+        expected_type = python_types.get(expected)
+        if expected_type and (isinstance(value, bool) or not isinstance(value, expected_type)):
+            raise TypeError(f"参数 '{name}' 必须是 {expected}")
 
 
 def safe_calculate(expression: str) -> int | float:
@@ -99,15 +128,16 @@ class ToolRegistry:
         """执行 Tool，带错误处理"""
         tool = self.get(name)
         if not tool:
-            return {"success": False, "error": f"Tool '{name}' 不存在"}
+            return failure("tool_not_found", f"Tool '{name}' 不存在")
 
         try:
+            validate_arguments(tool.parameters, arguments)
             result = tool.handler(**arguments)
             return result
         except TypeError as e:
-            return {"success": False, "error": f"参数错误: {e}"}
+            return failure("invalid_arguments", str(e))
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            return failure("handler_error", type(e).__name__)
 
 
 # ── Tool 定义 ──────────────────────────────────
@@ -130,19 +160,31 @@ def calculate_handler(expression: str) -> dict:
         result = safe_calculate(expression)
         return {"success": True, "expression": expression, "result": result}
     except Exception as e:
-        return {"success": False, "expression": expression, "error": str(e)}
+        return failure(
+            "invalid_arguments", str(e), details={"expression": expression}
+        )
 
 
 def read_file_handler(path: str) -> dict:
-    """读取文件"""
+    """只读取教学 Workspace 内的文本文件，并显式标记预览截断。"""
     try:
-        with open(path, "r") as f:
-            content = f.read()
-        return {"success": True, "path": path, "content": content[:500]}
+        candidate = (WORKSPACE_ROOT / path).resolve()
+        candidate.relative_to(WORKSPACE_ROOT)
+        with candidate.open("r", encoding="utf-8") as f:
+            preview = f.read(FILE_PREVIEW_LIMIT + 1)
+        truncated = len(preview) > FILE_PREVIEW_LIMIT
+        return {
+            "success": True,
+            "path": str(candidate.relative_to(WORKSPACE_ROOT)),
+            "content": preview[:FILE_PREVIEW_LIMIT],
+            "truncated": truncated,
+        }
+    except ValueError:
+        return failure("policy_denied", "路径超出允许的 Workspace")
     except FileNotFoundError:
-        return {"success": False, "error": f"文件不存在: {path}"}
+        return failure("invalid_arguments", f"文件不存在: {path}")
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return failure("handler_error", type(e).__name__)
 
 
 # ── 主流程 ─────────────────────────────────────

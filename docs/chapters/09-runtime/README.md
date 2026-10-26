@@ -79,11 +79,40 @@ Application 与 Runtime 的边界至少应分别保存或关联 `task_id`、`run
 
 恢复前必须比较任务版本、能力快照、Policy、Profile 和输入 Artifact 的兼容性。Replay 默认只读；若要重放副作用，必须显式进入重新执行流程并重新授权。
 
+### 1.5 状态持久化与 turn/step 术语不是单选答案
+
+生产 Runtime 常见三种持久化形态，成熟度不能只靠是否使用事件日志判断：
+
+| 形态 | 规范事实 | 优点 | 主要代价与适用条件 |
+|------|---------|------|------------------|
+| 快照型 | 某个 revision 的 `StateSnapshot` / Checkpoint | 恢复直接，容易理解当前状态 | 需要处理快照迁移、写入放大和中间因果证据；适合状态图、工作流和明确步骤边界 |
+| 日志型 | 追加式规范事件 | 审计、派生投影和从历史点 fork 自然 | 重放成本、事件演进、敏感数据与压缩复杂；适合需要完整会话历史和多视图投影的 Host |
+| 混合型 | 事件日志 + 周期快照/物化视图 | 兼顾审计与恢复速度 | 要证明快照与日志位置一致，并管理两套格式演进；适合长会话和高恢复频率系统 |
+
+日志型系统可以把 UI、Transcript、遥测和 fork 视为事件投影；快照型系统也可以保留有序状态历史并实现 time travel。二者都必须为持久化格式记录单调 `format_version`，在未知版本时 fail-loud，选择“迁移”或“拒绝并提示”，不能猜测兼容。Checkpoint、Trace 与 Memory 仍保持各自职责，不能仅因底层共用一份存储就把概念合并。
+
+“模型可见输入产生可追踪的规范事件”是审计目标，但不等于原文永久落盘。Secret、Credential 和受限文件内容可以只保存 `CredentialRef`、哈希、摘要或脱敏表示；原始值的访问由独立保留与授权策略控制。
+
+`turn` 和 `step` 在不同 SDK 中也不统一。本书采用下列限定，引用外部框架时必须附上对照：
+
+| 名称 | 本书限定 | 常见歧义 |
+|------|---------|---------|
+| 用户交互轮次 | 一次用户输入到一次可交付回复 | 有些 SDK 把一次 `Runner.run()` 称为逻辑 turn |
+| 模型调用轮次 | 一次模型请求及其响应 | 有些 SDK 的 `max_turns` 按 LLM 调用计数 |
+| Tool step | 一次经校验、Policy/Approval 后的 Tool 执行 | Plan step 可能包含零到多次模型或 Tool 调用 |
+| Runtime phase | Load / Reason / Plan / Execute / Observe 等教学阶段 | 阶段状态机是循环骨架，不是行业协议状态 |
+
+需要运行中 steering 的产品可以把用户消息、Tool Result 和系统事件放入有序 inbox，并在安全边界消费；是否允许消息插队、取消当前 Tool 或只影响下一次模型调用，必须由产品契约明确。任务完成条件应由可验证的交付标准决定，而不是仅凭“计划列表走完”或模型自称完成。
+
+> **来源类型：** Official Fact + 推导分析 —— OpenAI Agents SDK 当前同时区分逻辑对话 turn 与按 LLM 调用计数的 `max_turns`；LangGraph 以 StateSnapshot Checkpointer 提供持久化和 time travel。核查日期：2026-08-23。参考：[OpenAI Agents SDK: Running agents](https://openai.github.io/openai-agents-python/running_agents/)、[LangGraph Persistence](https://docs.langchain.com/oss/python/langgraph/persistence)。
+
 ---
 
 ## 2. Runtime 实现
 
 ### 2.1 Runtime 教学实现
+
+下面是用于解释生命周期、Hook、重试和超时边界的同步正文摘录，不是 `examples/runtime/` 的逐字副本。完整、受契约测试的异步最小实现以示例工程为唯一运行入口；正文没有实现跨进程暂停恢复、协作式中途取消或并行 Tool 配置，也不声明这些 API。
 
 ```python
 """
@@ -102,7 +131,6 @@ from typing import Any, Callable, Optional
 class RunState(Enum):
     IDLE = "idle"
     RUNNING = "running"
-    PAUSED = "paused"
     ERROR = "error"
     FINISHED = "finished"
     EXHAUSTED = "exhausted"
@@ -116,8 +144,6 @@ class RuntimeConfig:
     step_timeout: float = 30.0
     total_timeout: float = 300.0
     max_retries: int = 2
-    token_budget: int = 100000
-    enable_parallel_tools: bool = False
 
 
 @dataclass
@@ -126,7 +152,6 @@ class RunContext:
     task: str
     state: RunState = RunState.IDLE
     step_count: int = 0
-    token_used: int = 0
     start_time: float = 0.0
     errors: list[str] = field(default_factory=list)
     metrics: dict = field(default_factory=dict)
@@ -135,17 +160,10 @@ class RunContext:
 class AgentRuntime:
     """Agent Runtime"""
 
-    from typing import Optional
-
     def __init__(self, config: Optional[RuntimeConfig] = None):
         self.config = config or RuntimeConfig()
         self.context: Optional[RunContext] = None
         self._hooks: dict[str, list[Callable]] = {}
-        self._components: dict[str, Any] = {}
-
-    def register_component(self, name: str, component: Any):
-        """注册组件"""
-        self._components[name] = component
 
     def on(self, event: str, callback: Callable):
         """注册事件回调"""
@@ -172,26 +190,14 @@ class AgentRuntime:
         self._trigger("on_start", self.context)
         return self.context
 
-    def pause(self):
-        """暂停"""
-        if self.context:
-            self.context.state = RunState.PAUSED
-            self._trigger("on_pause", self.context)
-
-    def resume(self):
-        """恢复"""
-        if self.context and self.context.state == RunState.PAUSED:
-            self.context.state = RunState.RUNNING
-            self._trigger("on_resume", self.context)
-
     def cancel(self):
-        """取消"""
-        if self.context:
+        """请求在步骤边界取消；终态不可被覆盖。"""
+        if self.context and self.context.state == RunState.RUNNING:
             self.context.state = RunState.CANCELLED
             self._trigger("on_cancel", self.context)
 
     def finish(self, result: Any = None) -> RunContext:
-        """收尾并记录指标；不得覆盖取消、暂停、错误或耗尽状态。"""
+        """收尾并记录指标；不得覆盖取消、错误或耗尽状态。"""
         if self.context:
             self.context.metrics["total_time"] = (
                 time.time() - self.context.start_time
@@ -224,6 +230,10 @@ class AgentRuntime:
                 self._trigger("before_planning", self.context)
                 plan = planner(self.context, thought)
                 self._trigger("after_planning", self.context, plan)
+                if not plan:
+                    self.context.state = RunState.ERROR
+                    self.context.errors.append("Planner 返回空计划，运行无法取得进展")
+                    break
 
                 # 3. Execute
                 result = None
@@ -238,10 +248,12 @@ class AgentRuntime:
 
                     self.context.step_count += 1
 
-                # 4. 判断是否完成
-                if result is not None and self._is_complete(result):
-                    completed = True
-                    self.context.state = RunState.FINISHED
+                    if self._is_complete(result):
+                        completed = True
+                        self.context.state = RunState.FINISHED
+                        break
+
+                if completed:
                     break
 
             if self.context.state == RunState.RUNNING and not completed:
@@ -335,7 +347,6 @@ class AgentRuntime:
             "state": self.context.state.value,
             "steps": self.context.step_count,
             "max_steps": self.config.max_steps,
-            "token_used": self.context.token_used,
             "errors": len(self.context.errors),
             "elapsed": time.time() - self.context.start_time,
             **self.context.metrics
@@ -391,7 +402,7 @@ if __name__ == "__main__":
     main()
 ```
 
-可运行并带契约测试的双语言版本位于 `examples/runtime/`。它验证只有 `done=true` 才进入 `FINISHED`，并覆盖 `EXHAUSTED`、`CANCELLED` 与单步超时：
+可运行并带契约测试的双语言版本位于 `examples/runtime/`。它与上面的同步摘录采用不同的最小边界，验证只有 `done=true` 才进入 `FINISHED`，并覆盖 `EXHAUSTED`、`CANCELLED` 与单步超时：
 
 ```bash
 python examples/runtime/python/main.py
@@ -462,14 +473,20 @@ class ParallelRuntime(AgentRuntime):
             try:
                 results.append(future.result())
             except Exception as e:
-                results.append({"success": False, "error": str(e)})
+                results.append({
+                    "success": False, "error_code": "handler_error",
+                    "error_message": str(e), "retryable": False, "details": {},
+                })
         for future in not_done:
             future.cancel()
             tool_call = futures[future]
             results.append({
                 "success": False,
                 "tool": tool_call.get("name", "unknown"),
-                "error": f"并行批次超时 ({self.config.step_timeout}s)"
+                "error_code": "provider_timeout",
+                "error_message": f"并行批次超时 ({self.config.step_timeout}s)",
+                "retryable": True,
+                "details": {"phase": "parallel_batch"},
             })
         executor.shutdown(wait=False, cancel_futures=True)
         return results
@@ -505,11 +522,11 @@ class ParallelRuntime(AgentRuntime):
 
 ### Q: Runtime 和 Agent Loop 有什么区别？
 
-Agent Loop 是 Runtime 的核心循环（Reasoning → Planning → Execute → Observe），Runtime 是管理这个循环的完整环境（包括生命周期、错误处理、并发控制、监控）。
+Agent Loop 是 Runtime 的核心循环（Reasoning →〔可选的 Planning〕→ Execute → Observe），Runtime 是管理这个循环的完整环境（包括生命周期、错误处理、并发控制、监控）。简单反应式任务可以直接从结构化决策进入执行，复杂任务才需要显式 Planner。
 
 ### Q: 如何实现 Agent 的暂停和恢复？
 
-需要将 Runtime 状态（当前步骤、上下文、Memory）序列化。恢复时反序列化并继续执行。这要求所有组件支持序列化。
+本章的轻量循环不声明可用的 `pause()/resume()` API。生产暂停需要在安全步骤边界保存 Checkpoint（当前位置、上下文、审批、能力快照和幂等信息），由新进程或新实例加载后继续；进行中的模型流和 Tool 还必须接收同一个协作式取消信号。只修改内存状态标志，不能构成跨进程恢复，也不能保证已经开始的外部副作用停止。
 
 ---
 

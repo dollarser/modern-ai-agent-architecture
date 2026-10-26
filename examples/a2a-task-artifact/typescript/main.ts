@@ -38,6 +38,7 @@ export class InMemoryA2A {
   submit(taskId: string, idempotencyKey: string, tenantId: string, owner: string): Task {
     const existing = this.idempotency.get(idempotencyKey)
     if (existing) return this.tasks.get(existing)!
+    if (this.tasks.has(taskId)) throw new Error("同一 task_id 不能绑定不同幂等键")
     const task: Task = { taskId, contextId: `ctx-${taskId}`, tenantId, owner,
       status: "submitted", events: [], artifacts: [] }
     this.tasks.set(taskId, task); this.idempotency.set(idempotencyKey, taskId); this.emit(task, "submitted")

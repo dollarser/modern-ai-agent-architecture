@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any
 
 from assembly import AgentConfig, AgentHost, ExecutionContext, LLMAdapter, PlanStep, Tool
+from governance import sha256_text
+from safe_io import atomic_write_text
 
 
 class CodingPlanAdapter(LLMAdapter):
@@ -87,9 +89,7 @@ def install_coding_tools(host: AgentHost, workspace: Workspace) -> None:
         content = path.read_text("utf-8")
         if content.count(old) != 1:
             return {"success": False, "error": "补丁旧文本必须且只能匹配一次"}
-        temporary = path.with_suffix(path.suffix + ".tmp")
-        temporary.write_text(content.replace(old, new, 1), "utf-8")
-        temporary.replace(path)
+        atomic_write_text(path, content.replace(old, new, 1), preserve_mode=True)
         return {"success": True, "path": str(arguments["path"]), "changed": True}
 
     async def check(arguments: dict[str, Any], _context: ExecutionContext) -> dict[str, Any]:
@@ -99,7 +99,13 @@ def install_coding_tools(host: AgentHost, workspace: Workspace) -> None:
             sys.executable, "-m", "unittest", "-q", cwd=workspace.root,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await process.communicate()
+        try:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=1.5)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            if process.returncode is None:
+                process.kill()
+            await process.communicate()
+            raise
         return {
             "success": process.returncode == 0, "exit_code": process.returncode,
             "stdout": stdout.decode(errors="replace"), "stderr": stderr.decode(errors="replace"),
@@ -108,8 +114,12 @@ def install_coding_tools(host: AgentHost, workspace: Workspace) -> None:
     host.tools.register(Tool("list_files", "列出工作区文件", lambda _args, _ctx: {"success": True, "files": workspace.list_files()}, tags=("read",)))
     host.tools.register(Tool("read_file", "读取 UTF-8 文件", read, tags=("read",)))
     host.tools.register(Tool("search_code", "搜索代码文本", search, tags=("read",)))
-    host.tools.register(Tool("apply_patch", "精确替换一次文本", patch, tags=("write",), requires_approval=True))
-    host.tools.register(Tool("run_check", "运行预注册检查", check, tags=("execute",), requires_approval=True))
+    def prepare_patch(arguments: dict[str, Any], _context: ExecutionContext) -> dict[str, Any]:
+        target = workspace.resolve(str(arguments["path"]))
+        return {"target": str(target), "before_hash": sha256_text(target.read_text("utf-8"))}
+
+    host.tools.register(Tool("apply_patch", "精确替换一次文本", patch, prepare=prepare_patch, tags=("write",), requires_approval=True))
+    host.tools.register(Tool("run_check", "运行预注册检查", check, prepare=lambda *_: {"workspace": str(workspace.root), "command": [sys.executable, "-m", "unittest", "-q"]}, tags=("execute",), requires_approval=True))
     host.tools.register(Tool("report_change", "汇总修改", lambda _args, ctx: {
         "success": True,
         "report": f"已修改 {ctx.results[4]['path']}；测试退出码 {ctx.results[5]['exit_code']}。",

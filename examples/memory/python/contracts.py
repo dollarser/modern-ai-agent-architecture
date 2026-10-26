@@ -56,7 +56,9 @@ class ArtifactView:
 
 
 def estimate_tokens(text: str) -> int:
-    return max(1, (len(text) + 3) // 4)
+    non_ascii = sum(ord(char) > 127 for char in text)
+    ascii_chars = len(text) - non_ascii
+    return max(1, non_ascii + (ascii_chars + 3) // 4)
 
 
 def build_context(system: str, history: list[str], artifacts: list[ArtifactView], *, token_budget: int) -> list[str]:

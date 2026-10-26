@@ -14,7 +14,7 @@
 
 1. 掌握 10 种核心 Agent 设计模式
 2. 理解每种模式的原理、优缺点和适用场景
-3. 实现每种模式的最小可运行版本
+3. 区分模式控制流示意与各基础设施的权威实现
 4. 在架构设计中灵活组合多种模式
 
 ---
@@ -68,7 +68,7 @@ ReAct（Reasoning + Acting）将推理和行动交替进行，每步行动后观
 
 ### 2.2 控制流示意（基础实现见第 5 章）
 
-这里保留模式级伪实现，用于说明选择和组合；Reasoning/Planning 的定义、预算、终止条件和可运行 Planner 以[第 5 章](../05-reasoning-planning/)为唯一正文来源。
+这里保留模式级契约摘录，用于说明选择和组合；Reasoning/Planning 的定义、预算、终止条件和可运行 Planner 以[第 5 章](../05-reasoning-planning/README.md)为唯一正文来源。模型适配器必须返回结构化 `final` 或 `tool_call`，不能从自然语言 Thought 中用字符串匹配猜测动作。
 
 ```python
 """
@@ -82,39 +82,31 @@ class ReActLoop:
         self.max_steps = max_steps
         self.trajectory: list[dict] = []
 
-    def run(self, task: str, tools: dict, llm_reason) -> str:
+    def run(self, task: str, tools: dict, decide) -> str:
         """运行 ReAct 循环"""
         context = f"任务: {task}\n可用工具: {list(tools.keys())}"
 
         for step in range(self.max_steps):
-            # Thought: 推理
-            thought = llm_reason(context)
-            self.trajectory.append({"step": step, "type": "thought", "content": thought})
+            # Provider Adapter 返回并校验结构化决策，而不是暴露隐藏推理文本。
+            decision = decide(context)
+            if decision.get("type") == "final":
+                return str(decision["content"])
+            if decision.get("type") != "tool_call":
+                raise ValueError("decision 必须是 final 或 tool_call")
 
-            if "最终答案" in thought:
-                return thought
-
-            # Action: 从推理中提取行动
-            action, args = self._parse_action(thought, tools)
+            action = decision.get("name")
+            args = decision.get("arguments", {})
+            if action not in tools or not isinstance(args, dict):
+                raise ValueError("未知 Tool 或非法 arguments")
             self.trajectory.append({"step": step, "type": "action", "tool": action, "args": args})
 
             # Observation: 执行并观察
-            if action == "noop" or action not in tools:
-                result = {"result": "no action needed"}
-            else:
-                result = tools[action](**args)
+            result = tools[action](**args)
             self.trajectory.append({"step": step, "type": "observation", "content": result})
 
-            context += f"\nThought: {thought}\nAction: {action}({args})\nObservation: {result}"
+            context += f"\nAction: {action}({args})\nObservation: {result}"
 
-        return "达到最大步数限制"
-
-    def _parse_action(self, thought: str, tools: dict) -> tuple:
-        """从推理中解析行动（简化实现）"""
-        for name in tools:
-            if name in thought.lower():
-                return name, {}
-        return "noop", {}
+        raise RuntimeError(f"达到最大步数限制: {self.max_steps}")
 ```
 
 **优点：** 灵活、适应性强、能处理不确定性
@@ -156,6 +148,7 @@ class PlanAndExecute:
         completed = set()
 
         while len(completed) < len(plan):
+            progressed = False
             for step in plan:
                 if step["id"] in completed:
                     continue
@@ -165,6 +158,12 @@ class PlanAndExecute:
                     result = executor(step)
                     results.append({"step": step["id"], "result": result})
                     completed.add(step["id"])
+                    progressed = True
+
+            if not progressed:
+                remaining = [step["id"] for step in plan
+                             if step["id"] not in completed]
+                raise ValueError(f"计划存在缺失或循环依赖: {remaining}")
 
         return results
 ```
@@ -282,6 +281,8 @@ Handoff（委托）模式允许一个 Agent 将任务或子任务委托给另一
 
 ### 6.2 最小实现
 
+下面是同步、进程内的控制流示意，`busy` 只防止本对象内的重入，不是并发锁或跨进程租约。第 16 章的 `HandoffCoordinator` 使用可等待 Runner、父 Trace 与深度限制；实际组装以该端口为准，不能把两者当成相同 API。
+
 ```python
 class HandoffManager:
     """Handoff 模式 - Agent 间任务委托"""
@@ -310,10 +311,18 @@ class HandoffManager:
     def handoff(self, from_agent: str, to_agent: str, task: dict) -> dict:
         """执行 Handoff - 控制权从 from_agent 转移到 to_agent"""
         if to_agent not in self.agents:
-            return {"success": False, "error": f"Agent {to_agent} not found"}
+            return {
+                "success": False, "error_code": "tool_not_found",
+                "error_message": f"Agent {to_agent} not found",
+                "retryable": False, "details": {"agent": to_agent},
+            }
 
         if self.agents[to_agent]["busy"]:
-            return {"success": False, "error": f"Agent {to_agent} is busy"}
+            return {
+                "success": False, "error_code": "handler_error",
+                "error_message": f"Agent {to_agent} is busy",
+                "retryable": True, "details": {"agent": to_agent},
+            }
 
         self.agents[to_agent]["busy"] = True
         try:
@@ -473,11 +482,11 @@ class ToolRouter:
             if pattern in task_lower:
                 matched_tools.update(tool_names)
 
-        # 如果没有匹配，返回所有 Tool
+        # 未匹配时不扩大能力；由 Host 请求澄清或走显式默认路由。
         if not matched_tools:
-            return list(all_tools.keys())
+            return []
 
-        return list(matched_tools)
+        return sorted(matched_tools.intersection(all_tools))
 
     def get_tool_definitions(self, task: str, all_tools: dict) -> list[dict]:
         """获取路由后的 Tool 定义"""
@@ -498,7 +507,7 @@ class ToolRouter:
 
 **优点：** 减少 Tool 选择困难、降低 Token 使用、提升准确性
 **缺点：** 路由规则需要维护、可能遗漏合适 Tool
-**适用场景：** Tool 数量多（>10 个）、不同类型任务需要不同 Tool 集
+**适用场景：** Tool 描述占用明显上下文或任务需要不同 Tool 子集；阈值由评估决定。关键词 Router 只是教学启发式，不是安全边界。
 
 ---
 
@@ -508,79 +517,16 @@ class ToolRouter:
 
 Tool Registry 提供统一的工具注册、发现和执行机制。所有 Tool 通过中央注册表管理，Agent 按名称或分类查找 Tool，无需关心 Tool 的具体实现位置。这种模式将工具的定义（元数据）与执行（调用）解耦，便于动态添加/移除工具、按分类组织、以及生成 LLM 兼容的 Function Calling 定义。
 
-### 8.2 最小实现
+### 8.2 复用 Registry，不再定义第二套元数据
 
-```python
-from typing import Any, Callable
+注册、索引与调度实现以[第 11 章](../11-tool-registry/README.md)及其示例为准；最终 Host 元数据映射以[第 16 章](../16-agent-host/README.md)为准。本章只保留组合不变量：
 
-class ToolRegistry:
-    """Tool Registry 模式 - 统一工具注册与发现"""
+- 稳定身份、来源 Owner、Schema、实现修订和状态进入运行快照。
+- 发现、可见和执行授权分开；Router 缩小候选集，但不能授予权限。
+- 重注册应替换旧索引；命名冲突应在发布能力前失败。
+- Builtin、MCP 与 Plugin Tool 使用同一执行入口，错误映射遵循[统一错误契约](../../references/Error-Contract.md)。
 
-    def __init__(self):
-        self._tools: dict[str, dict] = {}
-        self._categories: dict[str, list[str]] = {}
-
-    def register(self, name: str, func: Callable, description: str,
-                 parameters: dict = None, category: str = "general") -> None:
-        """注册工具"""
-        self._tools[name] = {
-            "func": func,
-            "description": description,
-            "parameters": parameters or {},
-            "category": category,
-            "enabled": True
-        }
-        self._categories.setdefault(category, []).append(name)
-
-    def unregister(self, name: str) -> None:
-        """注销工具"""
-        tool = self._tools.pop(name, None)
-        if tool:
-            self._categories[tool["category"]].remove(name)
-
-    def get(self, name: str) -> dict | None:
-        """获取工具定义"""
-        tool = self._tools.get(name)
-        if tool and tool["enabled"]:
-            return tool
-        return None
-
-    def list_by_category(self, category: str = None) -> list[str]:
-        """按分类列出工具"""
-        if category:
-            return self._categories.get(category, [])
-        return list(self._tools.keys())
-
-    def get_definitions(self, tool_names: list[str] = None) -> list[dict]:
-        """获取 OpenAI 兼容的工具定义列表"""
-        names = tool_names or list(self._tools.keys())
-        definitions = []
-        for name in names:
-            tool = self._tools.get(name)
-            if tool and tool["enabled"]:
-                definitions.append({
-                    "type": "function",
-                    "function": {
-                        "name": name,
-                        "description": tool["description"],
-                        "parameters": tool["parameters"]
-                    }
-                })
-        return definitions
-
-    def execute(self, name: str, **kwargs) -> Any:
-        """执行工具"""
-        tool = self.get(name)
-        if not tool:
-            raise KeyError(f"Tool '{name}' not found or disabled")
-        return tool["func"](**kwargs)
-```
-
-**优点：** 工具发现与执行解耦、支持分类管理、便
-
-于动态注册/注销
-**缺点：** 增加一层间接调用开销、需要维护元数据一致性
-**适用场景：** 工具数量较多（>5 个）、需要动态加载/卸载工具、需要按场景筛选工具集
+**适用条件与代价：** 多来源 Tool 需要统一治理时采用 Registry；单个固定函数不必引入安装管理。Registry 增加索引一致性与版本迁移责任。
 
 ---
 
@@ -588,92 +534,20 @@ class ToolRegistry:
 
 ### 9.1 原理
 
-Plugin Registry 与 Tool Registry 是并列控制面，不是后者的子类或“更高一级 Tool Registry”。前者管理分发包的安装/加载/启停及其贡献项，后者管理本次运行可调用的 Tool Schema、来源、路由和状态。Plugin 激活后可向 Tool Registry 提交 Tool，也可以只贡献 Skill、Hook 或配置；停用时则按 Owner 原子撤回贡献项。
+Plugin 是分发和生命周期单元，不是工具别名。安装目录记录与运行期贡献应分开；加载失败不能留下半注册的 Tool、Hook 或 Service。
 
-### 9.2 最小实现
+### 9.2 选择与组合契约
 
-```python
-from abc import ABC, abstractmethod
+生命周期、贡献回滚和卸载语义统一引用[第 14 章](../14-plugin-system/README.md)与 `examples/plugin-manager/`；第 16 章通过可信 Factory Adapter 接入 Host，不再定义一套 `initialize / shutdown` 状态机。
 
-class PluginBase(ABC):
-    """插件基类"""
+| 场景 | 应验证什么 |
+|------|------------|
+| 激活失败 | 恢复到转换前状态，不发布部分能力 |
+| 依赖失效 | 拒绝启动或显式降级，不静默选择另一实现 |
+| 停用与卸载 | 移除该 Owner 的贡献；目录保留与删除语义分开 |
+| 运行中更新 | 已有运行绑定旧快照，新运行才看到已发布修订 |
 
-    @abstractmethod
-    def name(self) -> str:
-        """插件名称"""
-        ...
-
-    @abstractmethod
-    def version(self) -> str:
-        """插件版本"""
-        ...
-
-    def initialize(self, config: dict = None) -> None:
-        """初始化插件（可选重写）"""
-        pass
-
-    def shutdown(self) -> None:
-        """关闭插件（可选重写）"""
-        pass
-
-class PluginRegistry:
-    """Plugin Registry 模式 - 插件化扩展系统"""
-
-    def __init__(self):
-        self._plugins: dict[str, PluginBase] = {}
-        self._state: dict[str, str] = {}  # name -> status
-
-    def register(self, plugin: PluginBase) -> None:
-        """注册插件"""
-        self._plugins[plugin.name()] = plugin
-        self._state[plugin.name()] = "registered"
-
-    def activate(self, name: str, config: dict = None) -> bool:
-        """激活插件"""
-        plugin = self._plugins.get(name)
-        if not plugin:
-            return False
-        try:
-            plugin.initialize(config)
-            self._state[name] = "active"
-            return True
-        except Exception as e:
-            self._state[name] = f"error: {e}"
-            return False
-
-    def deactivate(self, name: str) -> bool:
-        """停用插件"""
-        plugin = self._plugins.get(name)
-        if not plugin:
-            return False
-        try:
-            plugin.shutdown()
-            self._state[name] = "inactive"
-            return True
-        except Exception:
-            return False
-
-    def get_active(self) -> list[str]:
-        """获取所有活跃插件"""
-        return [name for name, state in self._state.items()
-                if state == "active"]
-
-    def get_plugin(self, name: str) -> PluginBase | None:
-        """获取插件实例"""
-        return self._plugins.get(name)
-
-    def list_all(self) -> list[dict]:
-        """列出所有插件及其状态"""
-        return [
-            {"name": name, "version": p.version(),
-             "status": self._state.get(name, "unknown")}
-            for name, p in self._plugins.items()
-        ]
-```
-
-**优点：** 完整的生命周期管理、热插拔支持、插件间隔离
-**缺点：** 抽象层次较高、增加系统复杂度、插件质量参差不齐
-**适用场景：** 需要第三方扩展的大型 Agent 系统、IDE 类 Agent（如 Cursor/Copilot 插件）、企业级 Agent 平台
+**适用条件与代价：** 独立分发、升级和停用扩展时有价值；所有逻辑都在同一发布单元时，可先用模块与依赖注入，避免不必要的供应链和兼容性负担。
 
 ---
 
@@ -681,54 +555,18 @@ class PluginRegistry:
 
 ### 10.1 原理
 
-使用事件总线解耦 Agent 各组件，组件通过发布/订阅事件通信。
+Event Bus 适合已经发生的事实通知，例如 `run.completed`。需要同步返回值的协作使用 Service/Port；决定是否允许操作的检查使用 Guard。通知、请求与授权不能仅因都能写成回调就混用。
 
-### 10.2 实现
+### 10.2 交付与失败契约
 
-```python
-from collections import defaultdict
+| 选择 | 适用范围 | 必须说明的边界 |
+|------|----------|----------------|
+| 进程内 Observer Bus | UI、指标与非关键通知 | 进程退出会丢事件；订阅失败不能改变已提交事实 |
+| 持久化 Outbox + 消费者 | 业务提交后必须送达的通知 | 业务记录与 Outbox 同事务；消费者按事件 ID 去重 |
+| Service/Port | 需要返回值和明确失败的组件协作 | 超时、依赖与取消由调用方处理 |
+| Guard Pipeline | 执行前必须成立的约束 | fail-closed，不依赖异步订阅者阻断 Tool |
 
-class EventBus:
-    """事件总线"""
-
-    def __init__(self):
-        self._subscribers: dict[str, list[callable]] = defaultdict(list)
-        self._event_history: list[dict] = []
-
-    def subscribe(self, event_type: str, handler):
-        """订阅事件"""
-        self._subscribers[event_type].append(handler)
-
-    def publish(self, event_type: str, data: dict = None):
-        """发布事件"""
-        event = {"type": event_type, "data": data or {}, "timestamp": time.time()}
-        self._event_history.append(event)
-
-        for handler in self._subscribers.get(event_type, []):
-            try:
-                handler(event)
-            except Exception as e:
-                print(f"Event handler error [{event_type}]: {e}")
-
-        # 也通知通配符订阅者
-        for handler in self._subscribers.get("*", []):
-            try:
-                handler(event)
-            except Exception:
-                pass
-
-    def get_history(self, event_type: str = None) -> list[dict]:
-        """获取事件历史"""
-        if event_type:
-            return [e for e in self._event_history if e["type"] == event_type]
-        return self._event_history
-```
-
-该 Event Bus 是 Observer 通知示例：Subscriber 失败被隔离，不能用来承载权限拒绝、审批或其他必须 fail-closed 的控制。安全 Guard 应走同步、可返回明确决策的 Hook/Policy 路径；若使用持久化消息系统驱动业务状态，还需要事件 ID、Schema 版本、幂等消费者、确认与重放语义。
-
-**优点：** 松耦合、可扩展、可观测
-**缺点：** 调试困难、执行顺序不直观
-**适用场景：** 大型 Agent 系统、多组件协调
+第 16 章 `EventBusPort` 是内存教学适配器，不提供持久投递或 exactly-once 保证。Outbox 解决本地提交与通知的一致性，不能把外部写入变成本地事务。
 
 ---
 
@@ -736,51 +574,19 @@ class EventBus:
 
 ### 11.1 原理
 
-在生命周期关键节点设置拦截点，多个 Hook 按优先级顺序执行。
+Hook 用于在明确生命周期点扩展行为；完整执行规则以[第 10 章](../10-hooks/README.md)和 `examples/hooks/` 为准。
 
-### 11.2 实现
+### 11.2 与安全执行链组合
 
-```python
-class HookPipeline:
-    """Hook Pipeline 模式"""
+| 类别 | 失败策略 | 适合做什么 |
+|------|----------|------------|
+| Guard | 阻止 Handler，结构化记录拒绝原因 | Schema、Policy、审批绑定、资源约束 |
+| Observer | 隔离错误，记录观测失败 | Trace 副本、指标与调试通知 |
+| 输出变换 | 显式返回新值并再次校验 | 受控脱敏、格式转换；不能静默改写执行目标 |
 
-    def __init__(self):
-        self._hooks: dict[str, list[tuple[int, str, callable]]] = {}
+Hook 的优先级、Owner、异步等待、超时及卸载必须明确。审批展示的目标被修改后，应重新校验授权；Observer 也不得在回调中直接执行未授权副作用。
 
-    def register(self, event: str, handler,
-                 priority: int = 100, kind: str = "observer"):
-        """kind 只能是 guard 或 observer；安全检查必须注册为 guard。"""
-        if kind not in {"guard", "observer"}:
-            raise ValueError(f"未知 Hook 类型: {kind}")
-        self._hooks.setdefault(event, []).append((priority, kind, handler))
-        self._hooks[event].sort(key=lambda x: x[0])
-
-    def execute(self, event: str, context: dict, *args) -> dict:
-        """执行 Hook Pipeline（支持额外参数传递）"""
-        for _, kind, handler in self._hooks.get(event, []):
-            try:
-                result = handler(context, *args)
-                if result is False:  # 返回 False 表示中断
-                    context["_interrupted"] = True
-                    context["_denied_by"] = getattr(handler, "__name__", "anonymous")
-                    break
-                if isinstance(result, dict):
-                    context.update(result)
-            except Exception as e:
-                if kind == "guard":
-                    # fail-closed：调用方不得在异常后继续执行受保护动作。
-                    raise PermissionError(f"Guard Hook 拒绝执行: {e}") from e
-                context["_observer_errors"] = (
-                    context.get("_observer_errors", []) + [str(e)]
-                )
-        return context
-```
-
-调用方在执行 Tool Handler 前还必须检查 `_interrupted`；更推荐让 Guard 返回结构化 `allow / ask / deny`，避免把 `False` 的含义分散在不同 Hook 中。Observer 只用于日志、指标和审计副本，不能承担授权边界。
-
-**优点：** 关注点分离、可组合、可配置
-**缺点：** 顺序依赖、性能开销
-**适用场景：** 权限检查、日志、监控、数据脱敏
+**适用条件与代价：** 多个模块需要稳定扩展点时使用；过多 Hook 会隐藏控制流，关键状态转换仍应由 Runtime 和明确端口拥有。
 
 ---
 

@@ -141,7 +141,7 @@ Memory 关注「存什么」和「怎么检索」，Context 关注「当前放�
 
 **Q: Agent 遇到不支持的 Tool 调用怎么办？**
 
-返回结构化错误（`{"success": false, "error": "Tool not found"}`），让 LLM 在下一轮推理中自行调整策略。不要抛出未捕获异常，这会中断整个 Agent 循环。
+返回统一错误契约，例如 `{"success": false, "error_code": "tool_not_found", "error_message": "Tool not found", "retryable": false, "details": {}}`，让 Runtime 决定是否把可安全展示的错误反馈给模型并重新规划。不要把内部异常或敏感详情原样发送给模型，也不要让未捕获异常中断整个 Agent 循环。
 
 ### 流式输出与实时响应
 
@@ -183,6 +183,10 @@ Policy 计算 `allow/ask/deny`；Approval 持久化 `ask` 的决定；Guardrails
 
 组合使用：Golden Test（已知正确答案的任务）、LLM-as-Judge（语义质量评分）、人工评估（关键路径抽检）、A/B 测试（新旧版本对比）。建议建立评估数据集，并同时检查结果、轨迹、安全和资源包络。（→ 详见第 18 章「最佳实践、评估与反模式」测试与评估策略）
 
+**Q: CI 没有模型 API Key，如何回归完整 Agent 行为？**
+
+在组件 Mock 与真实模型 E2E 之间增加 keyless transcript replay：用确定性 Adapter 回放组装后的消息、Tool 轨迹、Observation、错误码和必要用户可见输出。真实模型测试无 Key 时可以显式跳过，但结构化回放必须执行；模型可见行为变化应与夹具更新放在同一变更中审查。不要用整段开放文本的逐字快照替代任务质量评估。（→ 详见第 17、18 章）
+
 **Q: 如何衡量 Agent 是否在变好？**
 
 定义核心指标基线（任务完成率、平均步数、Token 效率、用户满意度），每次改动后对比。版本管理不仅管理代码，也要管理 Prompt 和 Instructions 的版本。
@@ -211,7 +215,7 @@ Policy 计算 `allow/ask/deny`；Approval 持久化 `ask` 的决定；Guardrails
 
 ## 2. 延伸阅读
 
-### 2.1 学术论文
+### 2.1 论文与公开技术资料
 
 | 论文 | 年份 | 核心贡献 | 相关章节 |
 |------|------|---------|---------|
@@ -233,7 +237,7 @@ Policy 计算 `allow/ask/deny`；Approval 持久化 `ask` 的决定；Guardrails
 | [Agentless: Demystifying LLM-based Software Engineering Agents](https://arxiv.org/abs/2407.01489) | 2024 | 无 Agent 自动修复范式 | 第 15 章 |
 | [OpenAI o1 System Card](https://openai.com/index/openai-o1-system-card/) | 2024 | 推理时计算 (test-time compute) | 第5章 |
 | [Anthropic: Building Effective Agents](https://www.anthropic.com/research/building-effective-agents) | 2024 | Agent 架构实践指南 | 第 7 章 |
-| [Computer Use: Claude Agent on Desktop](https://www.anthropic.com/news/claude-computer-use) | 2024 | Agent 操控图形界面 | 第6章 |
+| [Introducing computer use, a new Claude 3.5 Sonnet, and Claude 3.5 Haiku](https://www.anthropic.com/news/3-5-models-and-computer-use) | 2024 | Agent 操控图形界面 | 第6章 |
 
 ### 2.2 官方文档与规范
 

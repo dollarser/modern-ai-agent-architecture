@@ -4,20 +4,25 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+from copy import deepcopy
+from types import CodeType
 import json
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Protocol, TypeVar, Union
 
+from coordination import *  # noqa: F401,F403 - 公共协调契约由 assembly 统一重导出
 from governance import (
     ConfigScope, DefaultPolicyEngine, PolicyDecision, PolicyEngine, PolicyLayer, PolicyRequest,
     sha256_text, with_snapshot_hash,
 )
+from safe_io import atomic_write_text
+from keyed_lock import keyed_lock, store_scope, track_execution, has_active_execution
+from runtime_state import *  # noqa: F401,F403 - 公共状态契约由 assembly 统一重导出
 
 
-ToolResult = dict[str, Any]
 ToolHandler = Callable[
     [dict[str, Any], "ExecutionContext"], Union[ToolResult, Awaitable[ToolResult]]
 ]
@@ -26,132 +31,17 @@ HookCallback = Callable[
     [str, dict[str, Any], "RunState"], Union[None, Awaitable[None]]
 ]
 T = TypeVar("T")
+ERROR_CODES = frozenset({"tool_not_found", "invalid_arguments", "policy_denied", "approval_denied",
+    "approval_required", "approval_expired", "handler_error", "provider_timeout", "cancelled",
+    "checkpoint_mismatch", "capability_unsupported", "budget_exceeded", "unknown_side_effect",
+    "runtime_error", "interrupted"})
 
 
 async def await_if_needed(value: Union[T, Awaitable[T]]) -> T:
     return await value if inspect.isawaitable(value) else value
 
 
-@dataclass(frozen=True)
-class PlanStep:
-    id: int
-    description: str
-    tool: str
-    arguments: dict[str, Any] = field(default_factory=dict)
-    depends_on: list[int] = field(default_factory=list)
-
-
-@dataclass
-class MemoryEntry:
-    role: str
-    content: str
-
-
-@dataclass
-class RunState:
-    run_id: str
-    task: str
-    plan: list[PlanStep]
-    results: dict[int, ToolResult] = field(default_factory=dict)
-    memory: list[MemoryEntry] = field(default_factory=list)
-    trace: list[dict[str, Any]] = field(default_factory=list)
-    approvals: dict[str, bool] = field(default_factory=dict)
-    step_count: int = 0
-    attempt_count: int = 0
-    status: str = "pending"
-    error: str | None = None
-    capability_snapshot: dict[str, Any] | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "run_id": self.run_id,
-            "task": self.task,
-            "plan": [asdict(step) for step in self.plan],
-            "results": {str(key): value for key, value in self.results.items()},
-            "memory": [asdict(entry) for entry in self.memory],
-            "trace": self.trace,
-            "approvals": self.approvals,
-            "step_count": self.step_count,
-            "attempt_count": self.attempt_count,
-            "status": self.status,
-            "error": self.error,
-            "capability_snapshot": self.capability_snapshot,
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "RunState":
-        return cls(
-            run_id=str(data["run_id"]),
-            task=str(data["task"]),
-            plan=[PlanStep(**step) for step in data.get("plan", [])],
-            results={int(key): value for key, value in data.get("results", {}).items()},
-            memory=[MemoryEntry(**entry) for entry in data.get("memory", [])],
-            trace=list(data.get("trace", [])),
-            approvals=dict(data.get("approvals", {})),
-            step_count=int(data.get("step_count", 0)),
-            attempt_count=int(data.get("attempt_count", 0)),
-            status=str(data.get("status", "pending")),
-            error=data.get("error"),
-            capability_snapshot=data.get("capability_snapshot"),
-        )
-
-
-# ── Memory port ──────────────────────────────────────────────────────────────
-
-class MemoryBackend(Protocol):
-    def append(
-        self, run_id: str, entry: MemoryEntry
-    ) -> Union[None, Awaitable[None]]: ...
-    def recent(
-        self, run_id: str, limit: int = 12
-    ) -> Union[list[MemoryEntry], Awaitable[list[MemoryEntry]]]: ...
-    def remember(
-        self, namespace: str, entry: MemoryEntry
-    ) -> Union[None, Awaitable[None]]: ...
-    def search(
-        self, namespace: str, query: str, limit: int = 5
-    ) -> Union[list[MemoryEntry], Awaitable[list[MemoryEntry]]]: ...
-
-
-class InMemoryMemoryBackend:
-    """短期按 Run 隔离；长期按 Namespace 隔离；检索使用确定性词项评分。"""
-
-    def __init__(self) -> None:
-        self.short_term: dict[str, list[MemoryEntry]] = {}
-        self.long_term: dict[str, list[MemoryEntry]] = {}
-
-    def append(self, run_id: str, entry: MemoryEntry) -> None:
-        self.short_term.setdefault(run_id, []).append(entry)
-
-    def recent(self, run_id: str, limit: int = 12) -> list[MemoryEntry]:
-        return list(self.short_term.get(run_id, [])[-limit:])
-
-    def remember(self, namespace: str, entry: MemoryEntry) -> None:
-        entries = self.long_term.setdefault(namespace, [])
-        if entry not in entries:
-            entries.append(entry)
-
-    def search(self, namespace: str, query: str, limit: int = 5) -> list[MemoryEntry]:
-        normalized = query.lower().replace("，", " ")
-        words = {item for item in normalized.split() if item}
-        # 二元片段让无空格的中文任务也能进行一个确定性的教学检索。
-        terms = words | {normalized[index:index + 2] for index in range(len(normalized) - 1)}
-        ranked: list[tuple[int, int, MemoryEntry]] = []
-        for index, entry in enumerate(self.long_term.get(namespace, [])):
-            content = entry.content.lower()
-            score = sum(term in content for term in terms)
-            if score:
-                ranked.append((score, index, entry))
-        ranked.sort(key=lambda item: (-item[0], item[1]))
-        return [entry for _, _, entry in ranked[:limit]]
-
-
 # ── Lifecycle hooks ─────────────────────────────────────────────────────────
-
-class HookKind(str, Enum):
-    GUARD = "guard"
-    OBSERVER = "observer"
-
 
 @dataclass(order=True)
 class HookDefinition:
@@ -226,6 +116,7 @@ class Tool:
     state: ToolState = ToolState.ACTIVE
     tags: tuple[str, ...] = ()
     requires_approval: bool = False
+    implementation_version: str = "1"
 
 
 @dataclass
@@ -281,7 +172,7 @@ class ToolRegistry:
     def snapshot(self) -> "ToolRegistry":
         frozen = ToolRegistry()
         for tool in self.list():
-            frozen.register(tool)
+            frozen.register(replace(tool, parameters=deepcopy(tool.parameters)))
         for alias, target in self._aliases.items():
             frozen.register_alias(alias, target)
         return frozen
@@ -291,8 +182,10 @@ class ToolRegistry:
 
 
 class ToolRouter:
-    def __init__(self, registry: ToolRegistry) -> None:
+    def __init__(self, registry: ToolRegistry, execution_scope: str = "") -> None:
         self.registry = registry
+        self.execution_scope = execution_scope
+        self.active_executions: set[asyncio.Task] = set()
 
     def available(self, *, tag: str | None = None) -> list[Tool]:
         return [
@@ -326,29 +219,8 @@ class ToolRouter:
 
     @staticmethod
     def _validate_arguments(schema: dict[str, Any], arguments: dict[str, Any]) -> None:
-        if not schema:
-            return
-        for name in schema.get("required", []):
-            if name not in arguments:
-                raise ValueError(f"Tool 参数缺少必填字段: {name}")
-        properties = schema.get("properties", {})
-        expected_types = {
-            "string": str, "number": (int, float), "integer": int,
-            "boolean": bool, "object": dict, "array": list,
-        }
-        for name, value in arguments.items():
-            definition = properties.get(name)
-            if definition is None:
-                if schema.get("additionalProperties") is False:
-                    raise ValueError(f"Tool 参数包含未知字段: {name}")
-                continue
-            expected = expected_types.get(definition.get("type"))
-            if expected and (not isinstance(value, expected) or (
-                definition.get("type") in {"number", "integer"} and isinstance(value, bool)
-            )):
-                raise TypeError(f"Tool 参数类型错误: {name}")
-            if "enum" in definition and value not in definition["enum"]:
-                raise ValueError(f"Tool 参数不在允许值中: {name}")
+        from schema_validation import validate
+        validate(schema, arguments)
 
 
 # ── Skills, MCP and Plugins ─────────────────────────────────────────────────
@@ -603,85 +475,6 @@ class ScriptedApprovalGate:
         return self.decisions.get(request.tool, False)
 
 
-class EventBusPort(Protocol):
-    def publish(
-        self, topic: str, payload: dict[str, Any]
-    ) -> Awaitable[None]: ...
-
-
-class EventBus:
-    def __init__(self) -> None:
-        self.events: list[dict[str, Any]] = []
-        self._subscribers: dict[
-            str, list[tuple[
-                HookKind, str,
-                Callable[[dict[str, Any]], Union[None, Awaitable[None]]],
-            ]]
-        ] = {}
-
-    def subscribe(
-        self, topic: str,
-        callback: Callable[[dict[str, Any]], Union[None, Awaitable[None]]], *,
-        kind: HookKind = HookKind.OBSERVER, name: str = "anonymous",
-    ) -> None:
-        self._subscribers.setdefault(topic, []).append((kind, name, callback))
-
-    async def publish(self, topic: str, payload: dict[str, Any]) -> None:
-        event = {"topic": topic, **payload}
-        self.events.append(event)
-        for kind, name, callback in self._subscribers.get(topic, []):
-            try:
-                await await_if_needed(callback(event))
-            except Exception as exc:
-                if kind is HookKind.GUARD:
-                    raise
-                self.events.append({
-                    "topic": "observer.error", "subscriber": name, "error": str(exc),
-                })
-
-
-@dataclass(frozen=True)
-class HandoffRequest:
-    task: str
-    parent_run_id: str
-    parent_trace_id: str
-    parent_span_id: str
-    depth: int = 1
-
-
-class AgentRunner(Protocol):
-    def run_task(self, request: HandoffRequest) -> ToolResult | Awaitable[ToolResult]: ...
-
-
-class ReviewSubagent:
-    def run_task(self, request: HandoffRequest) -> ToolResult:
-        return {
-            "success": True,
-            "review": "子 Agent 已验证候选路径与变更说明",
-            "parent_trace_id": request.parent_trace_id,
-            "parent_span_id": request.parent_span_id,
-        }
-
-
-class HandoffCoordinator:
-    def __init__(self, runner: AgentRunner, events: EventBusPort, max_depth: int = 2) -> None:
-        self.runner, self.events, self.max_depth = runner, events, max_depth
-
-    async def handoff(self, request: HandoffRequest) -> ToolResult:
-        if request.depth > self.max_depth:
-            return {"success": False, "error": "Handoff 超过最大深度"}
-        await self.events.publish(
-            "handoff.created",
-            {"run_id": request.parent_run_id, "trace_id": request.parent_trace_id},
-        )
-        result = await await_if_needed(self.runner.run_task(request))
-        await self.events.publish(
-            "handoff.completed",
-            {"run_id": request.parent_run_id, "success": result.get("success")},
-        )
-        return result
-
-
 # ── Runtime ports and execution ─────────────────────────────────────────────
 
 class LLMAdapter(Protocol):
@@ -701,7 +494,7 @@ class DeterministicLLMAdapter:
     ) -> list[PlanStep]:
         self.last_context = list(context)
         required = {
-            "search_catalog", "inspect_candidate", "summarize_matches",
+            "search_catalog", "catalog-server.search_catalog", "inspect_candidate", "summarize_matches",
             "propose_change", "delegate_review", "compose_report",
         }
         missing = sorted(required.difference(tool_names))
@@ -740,9 +533,7 @@ class JsonCheckpointStore:
     def save(self, state: RunState) -> None:
         data = self._read_all()
         data[state.run_id] = state.to_dict()
-        temporary = self.path.with_suffix(self.path.suffix + ".tmp")
-        temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-        temporary.replace(self.path)
+        atomic_write_text(self.path, json.dumps(data, ensure_ascii=False, indent=2))
 
     def load(self, run_id: str) -> RunState | None:
         item = self._read_all().get(run_id)
@@ -759,7 +550,7 @@ class AgentConfig:
     interrupt_after_steps: int | None = None
     allowed_tools: frozenset[str] = frozenset(
         {
-            "search_catalog", "inspect_candidate", "summarize_matches",
+            "search_catalog", "catalog-server.search_catalog", "inspect_candidate", "summarize_matches",
             "propose_change", "delegate_review", "compose_report",
         }
     )
@@ -824,27 +615,39 @@ class DependencyExecutor:
             batch = ready[:remaining]
             if self.config.interrupt_after_steps is not None:
                 batch = batch[: self.config.interrupt_after_steps - (state.step_count - started_at)]
-            results = await asyncio.gather(
-                *(self._execute_step(step, state, checkpoint) for step in batch)
-            )
-            for step, result in zip(batch, results):
+            async def execute_and_record(step: PlanStep) -> None:
+                result = await self._execute_step(step, state, checkpoint)
                 state.results[step.id] = result
+                state.executions.pop(str(step.id), None)
                 state.step_count += 1
-                state.memory.append(
-                    entry := MemoryEntry("tool", json.dumps(
-                        {"step_id": step.id, "tool": step.tool, "result": result},
-                        ensure_ascii=False,
-                    ))
-                )
+                entry = MemoryEntry("tool", json.dumps(
+                    {"step_id": step.id, "tool": step.tool, "result": result},
+                    ensure_ascii=False,
+                ))
+                state.memory.append(entry)
+                # 保存结果先于外部 Memory I/O，避免兄弟步骤取消丢失已完成结果。
+                await await_if_needed(checkpoint())
                 await await_if_needed(self.memory.append(state.run_id, entry))
-            await await_if_needed(checkpoint())
+
+            tasks = [asyncio.create_task(execute_and_record(step)) for step in batch]
+            try:
+                await asyncio.gather(*tasks)
+            except BaseException:
+                for task in tasks:
+                    task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+                raise
 
         failure = next(
             (result for result in state.results.values() if not result.get("success", False)),
             None,
         )
         if failure:
-            state.status, state.error = "failed", str(failure.get("error", "Tool 执行失败"))
+            state.status = "reconciliation_required" if any(
+                result.get("outcome_unknown") for result in state.results.values()
+            ) else "failed"
+            state.error = ("execution_outcome_unknown" if state.status == "reconciliation_required"
+                           else str(failure.get("error", "Tool 执行失败")))
         else:
             state.status, state.error = "completed", None
         await await_if_needed(checkpoint())
@@ -860,10 +663,12 @@ class DependencyExecutor:
         )
         try:
             await self.hooks.emit("before_tool", payload, state)
+            arguments = deepcopy(step.arguments)
             tool = self.router.resolve(step.tool)
+            self.router._validate_arguments(tool.parameters, arguments)
             decision = self.policy.evaluate(PolicyRequest(
-                subject="agent", capability=step.tool, arguments=step.arguments,
-                resource=step.tool, run_id=state.run_id,
+                subject="agent", capability=tool.name, arguments=deepcopy(arguments),
+                resource=tool.name, invoked_as=step.tool, run_id=state.run_id,
                 source=f"{tool.source.value}:{tool.source_name}",
                 risk="high" if tool.requires_approval else "normal",
             ))
@@ -872,27 +677,25 @@ class DependencyExecutor:
                 "decision": decision.value, "policy_version": self.policy.version,
             })
             if decision is PolicyDecision.DENY:
-                raise PermissionError(f"Policy 拒绝 Tool: {step.tool}")
+                return {"success": False, "error": f"Policy 拒绝 Tool: {step.tool}", "error_code": "policy_denied"}
             if decision is PolicyDecision.ASK:
-                approval_id = (
-                    f"{state.run_id}:{step.id}:{step.tool}:{self.snapshot_hash}"
-                )
+                dependency_results = {
+                    str(dependency): state.results[dependency]
+                    for dependency in step.depends_on
+                }
+                preview = {
+                    "task": state.task, "tool": tool.name,
+                    "arguments": deepcopy(arguments),
+                    "dependency_results": dependency_results,
+                }
+                if tool.prepare is not None:
+                    preview.update(tool.prepare(deepcopy(arguments), context))
+                intent_hash = with_snapshot_hash({"arguments": arguments, "preview": preview})["snapshot_hash"]
+                approval_id = f"{state.run_id}:{step.id}:{tool.name}:{self.snapshot_hash}:{intent_hash}"
                 if approval_id not in state.approvals:
-                    dependency_results = {
-                        str(dependency): state.results[dependency]
-                        for dependency in step.depends_on
-                    }
-                    preview = {
-                        "task": state.task,
-                        "tool": step.tool,
-                        "arguments": step.arguments,
-                        "dependency_results": dependency_results,
-                    }
-                    if tool.prepare is not None:
-                        preview.update(tool.prepare(step.arguments, context))
                     request = ApprovalRequest(
-                        approval_id, state.run_id, step.tool, step.arguments,
-                        "Tool 声明 requires_approval", preview, "high", approval_id,
+                        approval_id, state.run_id, tool.name, deepcopy(arguments),
+                        "Policy 请求审批", deepcopy(preview), "high", approval_id,
                     )
                     await self.hooks.emit(
                         "before_approval", {**payload, "request": request.id}, state
@@ -908,23 +711,38 @@ class DependencyExecutor:
                     # 审批决定必须先于有副作用的 Handler 持久化。
                     await await_if_needed(checkpoint())
                 if not state.approvals[approval_id]:
-                    result = {"success": False, "error": f"审批拒绝执行: {step.tool}"}
-                    await self.hooks.emit("on_tool_error", {**payload, "result": result}, state)
-                    await self.hooks.emit("after_tool", {**payload, "result": result}, state)
+                    result = {"success": False, "error": f"审批拒绝执行: {step.tool}", "error_code": "approval_denied"}
+                    await self.hooks.emit(
+                        "on_approval_rejected", {**payload, "result": result}, state
+                    )
                     return result
         except Exception as exc:
-            result = {"success": False, "error": f"Guardrail 拒绝执行: {exc}"}
+            result = {"success": False, "error": f"Tool 调用管线失败: {exc}",
+                      "error_code": "invalid_arguments" if isinstance(exc, (ValueError, TypeError))
+                      else "tool_not_found" if isinstance(exc, LookupError) else "runtime_error"}
             await self.hooks.emit("on_tool_error", {**payload, "result": result}, state)
             await self.hooks.emit("after_tool", {**payload, "result": result}, state)
             return result
 
+        state.executions[str(step.id)] = "started"
+        await await_if_needed(checkpoint())
         last_error = "Tool 执行失败"
         attempt = 0
         for attempt in range(1, self.config.max_retries + 2):
             state.attempt_count += 1
             try:
+                execution = asyncio.create_task(
+                    self.router.execute(step.tool, deepcopy(arguments), context)
+                )
+                self.router.active_executions.add(execution)
+                track_execution(self.router.execution_scope, state.run_id, execution)
+                def finished(task: asyncio.Task) -> None:
+                    self.router.active_executions.discard(task)
+                    if not task.cancelled():
+                        task.exception()
+                execution.add_done_callback(finished)
                 result = await asyncio.wait_for(
-                    self.router.execute(step.tool, step.arguments, context),
+                    asyncio.shield(execution),
                     timeout=self.config.step_timeout,
                 )
                 result = {**result, "attempts": attempt}
@@ -935,8 +753,14 @@ class DependencyExecutor:
                 if not result.get("retryable", False):
                     break
             except asyncio.TimeoutError:
-                last_error = f"Tool '{step.tool}' 超时"
-                break
+                # 超时不等于停止；后台任务保留到完成，但不允许自动重放。
+                result = {"success": False, "error": "execution_outcome_unknown",
+                          "outcome_unknown": True, "retryable": False, "attempts": attempt}
+                await self.hooks.emit("on_tool_error", {**payload, "result": result}, state)
+                await self.hooks.emit("after_tool", {**payload, "result": result}, state)
+                return result
+            except asyncio.CancelledError:
+                raise
             except Exception as exc:
                 last_error = str(exc)
                 break
@@ -981,6 +805,7 @@ class AgentHost:
         self.skills = SkillRegistry()
         self.plugins = PluginLoader(self.tools, self.skills, self.hooks)
         self.checkpoints = checkpoint_store or JsonCheckpointStore(checkpoint_path)
+        self.lock_scope = store_scope(self.checkpoints)
         self.mcp = MCPToolAdapter(mcp_client or FakeMCPClient(), "catalog-server")
         self.installed_skills = installed_skills
         self.mcp_servers = mcp_servers
@@ -1012,6 +837,42 @@ class AgentHost:
     async def run(
         self, task: str, run_id: str, conversation_context: list[str] | None = None
     ) -> dict[str, Any]:
+        async with keyed_lock(self.lock_scope, run_id):
+            return await self._run_guarded(task, run_id, conversation_context)
+
+    async def reconcile(
+        self, run_id: str, step_id: int,
+        verify: Callable[[RunState, PlanStep], Union[dict[str, Any], Awaitable[dict[str, Any]]]],
+    ) -> RunState:
+        """可信 Adapter 核对下游回执；不是面向模型的 Tool，也不派发业务操作。"""
+        async with keyed_lock(self.lock_scope, run_id):
+            if has_active_execution(self.lock_scope, run_id):
+                raise RuntimeError("execution_still_active")
+            state = await await_if_needed(self.checkpoints.load(run_id))
+            if state is None:
+                raise LookupError("Run 不存在")
+            if str(step_id) not in state.executions and not state.results.get(step_id, {}).get("outcome_unknown"):
+                raise ValueError("step_not_unknown")
+            step = next(item for item in state.plan if item.id == step_id)
+            receipt = await await_if_needed(verify(deepcopy(state), deepcopy(step)))
+            evidence, result = receipt.get("evidence"), receipt.get("result")
+            if (not isinstance(evidence, str) or not evidence.strip()
+                or not isinstance(result, dict) or not isinstance(result.get("success"), bool)
+                or result.get("outcome_unknown") or result.get("retryable")):
+                raise ValueError("invalid_reconciliation_receipt")
+            # 对账只补录确定结果，不把步骤重置为可重试。
+            if step_id not in state.results:
+                state.step_count += 1
+            state.results[step_id] = {**deepcopy(result), "retryable": False}
+            state.executions.pop(str(step_id), None)
+            state.trace.append({"event": "execution_reconciled", "step": step_id, "evidence": evidence})
+            state.status, state.error = "interrupted", None
+            await await_if_needed(self.checkpoints.save(state))
+            return state
+
+    async def _run_guarded(
+        self, task: str, run_id: str, conversation_context: list[str] | None = None
+    ) -> dict[str, Any]:
         started = time.monotonic()
         try:
             return await self._run(task, run_id, started, conversation_context or [])
@@ -1023,6 +884,9 @@ class AgentHost:
                 state = state or RunState(run_id, task, [])
             except Exception:
                 state = RunState(run_id, task, [])
+            if state.status == "completed" and state.final_answer is not None:
+                state.trace.append({"event": "delivery_error", "error": str(exc)})
+                return self._result(state, state.final_answer, False, started)
             state.status = "failed"
             state.error = f"runtime_error: {exc}"
             try:
@@ -1098,11 +962,34 @@ class AgentHost:
         if errors:
             raise RuntimeError("扩展关闭存在错误: " + "; ".join(errors))
 
+    @staticmethod
+    def _implementation_digest(handler: Any) -> str:
+        def code_identity(code: CodeType) -> tuple:
+            # 使用稳定字节码/常量标识，不依赖运行时对象地址与集合排列。
+            def constant(item: Any) -> Any:
+                if isinstance(item, CodeType):
+                    return code_identity(item)
+                if isinstance(item, tuple):
+                    return tuple(constant(value) for value in item)
+                if isinstance(item, frozenset):
+                    return ("frozenset", tuple(sorted(repr(constant(value)) for value in item)))
+                return repr(item)
+            return (code.co_code.hex(), code.co_names, code.co_varnames,
+                    code.co_freevars, code.co_cellvars, code.co_argcount,
+                    code.co_kwonlyargcount, code.co_flags,
+                    tuple(constant(item) for item in code.co_consts))
+        code = getattr(handler, "__code__", None)
+        return sha256_text(repr(code_identity(code)) if code else type(handler).__qualname__)
+
     def _capability_snapshot(self) -> dict[str, Any]:
         payload = {
             "tools": [{
                 "name": tool.name, "schema": tool.parameters,
                 "source": tool.source.value, "source_name": tool.source_name,
+                "implementation_version": tool.implementation_version,
+                "handler_digest": self._implementation_digest(tool.handler),
+                "prepare_digest": self._implementation_digest(tool.prepare),
+                "requires_approval": tool.requires_approval, "state": tool.state.value,
             } for tool in self.tools.list()],
             "tool_aliases": self.tools.aliases(),
             "skills": [{
@@ -1110,16 +997,17 @@ class AgentHost:
                 "checksum": sha256_text(skill.instructions),
             } for skill in sorted(self.skills._skills.values(), key=lambda item: item.name)],
             "policy_version": self.policy.version,
+            "policy": self.policy.snapshot() if isinstance(self.policy, DefaultPolicyEngine) else {},
             "config": {"allowed_tools": sorted(self.config.allowed_tools)},
         }
-        return with_snapshot_hash(payload)
+        return with_snapshot_hash(deepcopy(payload))
 
     async def _run(
         self, task: str, run_id: str, started: float, conversation_context: list[str]
     ) -> dict[str, Any]:
         await self._initialize_extensions()
         current_snapshot = self._capability_snapshot()
-        run_router = ToolRouter(self.tools.snapshot())
+        run_router = ToolRouter(self.tools.snapshot(), self.lock_scope)
         if not self._memory_initialized and self.initial_memory is not None:
             await await_if_needed(self.memory.remember("default", self.initial_memory))
             self._memory_initialized = True
@@ -1132,8 +1020,7 @@ class AgentHost:
                 mismatch, "同一 run_id 不能恢复为不同任务", False, started
             )
         if (
-            restored and restored.capability_snapshot
-            and restored.capability_snapshot.get("snapshot_hash")
+            restored and (restored.capability_snapshot or {}).get("snapshot_hash")
             != current_snapshot["snapshot_hash"]
         ):
             mismatch = RunState(run_id, task, [])
@@ -1141,6 +1028,12 @@ class AgentHost:
             mismatch.error = "capability_snapshot_mismatch"
             mismatch.capability_snapshot = current_snapshot
             return self._result(mismatch, mismatch.error, False, started)
+
+        if restored and (restored.executions or any(
+            result.get("outcome_unknown") for result in restored.results.values()
+        )):
+            restored.status, restored.error = "reconciliation_required", "execution_outcome_unknown"
+            return self._result(restored, "执行结果未知，核对副作用后再创建新 Run", True, started)
 
         if restored:
             state = restored
@@ -1153,8 +1046,10 @@ class AgentHost:
                     existing_memory.append(entry)
             resumed = state.status != "completed"
             if state.status == "completed":
-                final = await self.llm.final_answer(task, state.results)
-                return self._result(state, final, False, started, replayed=True)
+                if state.final_answer is None:
+                    state.final_answer = await self.llm.final_answer(task, state.results)
+                    await await_if_needed(self.checkpoints.save(state))
+                return self._result(state, state.final_answer, False, started, replayed=True)
             await self.hooks.emit("before_run", {"task": task, "resumed": True}, state)
             await self.hooks.emit("on_resume", {"status": state.status}, state)
         else:
@@ -1192,11 +1087,20 @@ class AgentHost:
             run_router, self.hooks, self.approval, self.memory, self.config,
             self.policy, current_snapshot["snapshot_hash"],
         )
-        await executor.run(state, lambda: self.checkpoints.save(state))
-        final = (
-            await self.llm.final_answer(task, state.results)
-            if state.status == "completed" else state.error or "任务未完成"
-        )
+        checkpoint_lock = asyncio.Lock()
+        async def checkpoint() -> None:
+            async with checkpoint_lock:
+                await await_if_needed(self.checkpoints.save(deepcopy(state)))
+        await executor.run(state, checkpoint)
+        if state.status == "completed":
+            state.status = "finalizing"
+            await checkpoint()
+            final = await self.llm.final_answer(task, state.results)
+            state.final_answer, state.status = final, "completed"
+            await checkpoint()  # 先持久化可回放交付物，再执行观测/消息副作用。
+        else:
+            final = state.error or "任务未完成"
+
         await self._record_memory(
             state, "assistant" if state.status == "completed" else "system", final
         )
@@ -1212,8 +1116,20 @@ class AgentHost:
     def _result(
         state: RunState, final: str, resumed: bool, started: float, *, replayed: bool = False
     ) -> dict[str, Any]:
+        success = state.status == "completed"
+        normalized_code = None
+        if not success:
+            normalized_code = (
+                "checkpoint_mismatch"
+                if state.error in {"run_task_mismatch", "capability_snapshot_mismatch"}
+                else "unknown_side_effect" if state.error == "execution_outcome_unknown"
+                else next((str(result["error_code"]) for result in state.results.values()
+                           if not result.get("success") and result.get("error_code") in ERROR_CODES), "runtime_error" if (state.error or "").startswith("runtime_error:")
+                          else "budget_exceeded" if state.status == "max_steps"
+                          else "interrupted" if state.status == "interrupted" else "handler_error")
+            )
         return {
-            "success": state.status == "completed",
+            "success": success,
             "status": state.status,
             "run_id": state.run_id,
             "resumed": resumed,
@@ -1222,6 +1138,11 @@ class AgentHost:
             "attempts": state.attempt_count,
             "results": state.results,
             "final": final,
+            "error_code": normalized_code,
+            "error_message": None if success else final,
+            "retryable": False,
+            "details": {} if success else {"reason": state.error or normalized_code},
+            # 兼容早期教学调用方；跨边界代码应读取 error_code/details。
             "error": state.error,
             "trace": state.trace,
             "elapsed_ms": round((time.monotonic() - started) * 1000, 2),

@@ -53,8 +53,13 @@ class Memory {
 
   /** 估算当前 token 使用量 */
   estimateTokens(): number {
-    const total = this.shortTerm.reduce((sum, m) => sum + m.content.length, 0);
-    return Math.floor(total / 4); // 粗略估算：4 字符 ≈ 1 token
+    // 依赖无关的保守近似；精确预算应使用目标模型 tokenizer。
+    return this.shortTerm.reduce((sum, message) => {
+      const characters = Array.from(message.content);
+      const nonAscii = characters.filter((char) => char.codePointAt(0)! > 127).length;
+      const ascii = characters.length - nonAscii;
+      return sum + nonAscii + Math.ceil(ascii / 4);
+    }, 0);
   }
 
   /** 检查是否接近上下文窗口限制 */

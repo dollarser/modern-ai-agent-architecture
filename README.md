@@ -31,13 +31,13 @@
 | 目标 | 推荐入口 |
 | --- | --- |
 | 直接阅读 | [在线阅读](https://blog.sunlingzhang.com/modern-ai-agent-architecture/) |
-| 浏览完整目录 | [20 章目录](docs/SUMMARY.md) |
+| 浏览完整目录 | [全书目录](docs/SUMMARY.md) |
 | 按阶段学习 | [学习路线](docs/roadmap/Roadmap.md) |
 | 运行代码 | [代码示例索引](docs/references/CodeExamples.md) |
-| 查看正式版本 | [v1.0.0 Release](https://github.com/dollarser/modern-ai-agent-architecture/releases/tag/v1.0.0) |
+| 查看正式版本 | [最新 Release](https://github.com/dollarser/modern-ai-agent-architecture/releases/latest) |
 | 报告问题或提出建议 | [Issues](https://github.com/dollarser/modern-ai-agent-architecture/issues) |
 
-全书保持现有 20 章和六大部分结构：基础认知、构建首个 Agent、可靠运行、扩展与互操作、规模化与生产、案例与选型。
+全书按六大部分组织：基础认知、构建首个 Agent、可靠运行、扩展与互操作、规模化与生产、案例与选型。
 
 ## 30 秒运行第一个 Agent
 
@@ -69,7 +69,7 @@ npm run start
 | Agent Host 与应用闭环 | `agent-host`、`coding-agent-mvp` |
 | 工程验证 | `evaluation-contract`、`model-capability-contract` |
 
-仓库包含 18 个独立示例工程、Python/TypeScript 共 36 个入口。示例优先采用离线、确定性适配器，重点验证协议模型、状态转换、安全边界和组件装配；它们是教学实现，不等同于生产级沙箱、远程传输或完整商业产品。
+仓库配套 Python/TypeScript 独立示例与契约测试。示例优先采用离线、确定性适配器，重点验证协议模型、状态转换、安全边界和组件装配；它们是教学实现，不等同于生产级沙箱、远程传输或完整商业产品。当前章节、图表、示例与测试数量统一记录在[出版基线](specs/book/11-current-baseline.md)，其他页面不重复维护库存数字。
 
 ## 本地阅读与完整检查
 
@@ -82,6 +82,7 @@ uv pip install -r requirements-docs.txt
 # 构建与检查
 .venv/bin/mkdocs build --strict
 .venv/bin/python scripts/check_internal_links.py .
+npm run check:baseline
 npm install
 npm run check:mermaid
 ```
@@ -101,11 +102,11 @@ npm run check:mermaid
 
 ```text
 .
-├── docs/                  # MkDocs 书稿、20 章正文与附录
+├── docs/                  # MkDocs 书稿、正文与附录
 ├── examples/              # Python/TypeScript 教学示例与契约测试
 ├── specs/                 # 现行书籍规范与历史需求归档
 ├── reviews/               # 审查报告、出版基线与维护记录
-├── scripts/               # 链接与 Mermaid 校验脚本
+├── scripts/               # 出版基线、链接、源码摘录与 Mermaid 校验脚本
 ├── .github/               # GitHub Actions
 ├── mkdocs.yml             # 文档站配置
 ├── requirements-docs.txt  # 固定的文档构建依赖

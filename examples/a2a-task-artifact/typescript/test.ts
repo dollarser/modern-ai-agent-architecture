@@ -4,6 +4,7 @@ import { InMemoryA2A } from "./main.js"
 const server = new InMemoryA2A()
 const task = server.submit("task-1", "idem-1", "tenant-a", "alice")
 assert.equal(server.submit("task-2", "idem-1", "tenant-a", "alice"), task)
+assert.throws(() => server.submit("task-1", "idem-2", "tenant-a", "alice"), /task_id/)
 server.work(task.taskId, { answer: "完成" })
 assert.equal(task.status, "completed")
 assert.equal(server.artifacts.get(task.artifacts[0].artifactId, "tenant-a", "alice").toString(), '{"answer":"完成"}')

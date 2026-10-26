@@ -37,7 +37,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-所有 Python 示例仅依赖 Python 标准库；其中 `a2a-task-artifact`、`agent-host`、`evaluation-contract`、`hooks`、`mcp-manager`、`model-capability-contract`、`plugin-manager`、`runtime`、`skills` 和 `tool-registry` 提供契约测试。
+所有 Python 示例仅依赖 Python 标准库；其中 `a2a-task-artifact`、`agent-host`、`agent-mvp-minimal`、`evaluation-contract`、`hooks`、`mcp-manager`、`memory`、`model-capability-contract`、`plugin-manager`、`runtime`、`skills` 和 `tool-registry` 提供契约测试。
 
 ### TypeScript 示例
 

@@ -10,17 +10,18 @@
 declare const process: { argv: string[] };
 
 type HookCallback = (...args: unknown[]) => void;
+export type HookMode = "guard" | "observer";
 export type ToolResult = { success: boolean; content: string };
 
 export class HookSystem {
-  private hooks: Map<string, HookCallback[]> = new Map();
+  private hooks: Map<string, Array<{ mode: HookMode; callback: HookCallback }>> = new Map();
 
   /** 注册 Hook */
-  register(event: string, callback: HookCallback): void {
+  register(event: string, callback: HookCallback, mode: HookMode = "observer"): void {
     if (!this.hooks.has(event)) {
       this.hooks.set(event, []);
     }
-    this.hooks.get(event)!.push(callback);
+    this.hooks.get(event)!.push({ mode, callback });
   }
 
   /** 触发 Hook */
@@ -28,11 +29,11 @@ export class HookSystem {
     const callbacks = this.hooks.get(event);
     if (!callbacks) return;
 
-    for (const hook of callbacks) {
+    for (const { mode, callback } of callbacks) {
       try {
-        hook(...args);
+        callback(...args);
       } catch (e) {
-        if (event.startsWith("before_")) throw e;
+        if (mode === "guard") throw e;
         console.log(`  [Hook Error] ${event}: ${e}`);
       }
     }
@@ -67,8 +68,8 @@ export class AgentWithHooks {
   }
 
   /** 注册自定义 Hook */
-  registerCustomHook(event: string, callback: HookCallback): void {
-    this.hooks.register(event, callback);
+  registerCustomHook(event: string, callback: HookCallback, mode: HookMode = "observer"): void {
+    this.hooks.register(event, callback, mode);
   }
 
   /** 运行 Agent 生命周期 */
@@ -114,7 +115,7 @@ function main(): void {
     }
     console.log(`  [PERMISSION] ✅ 允许 Tool: ${name}`);
   };
-  agent.registerCustomHook("before_tool_call", permissionCheck);
+  agent.registerCustomHook("before_tool_call", permissionCheck, "guard");
 
   agent.registerCustomHook("after_tool_call", (_toolName: unknown, value: unknown) => {
     const result = value as ToolResult;

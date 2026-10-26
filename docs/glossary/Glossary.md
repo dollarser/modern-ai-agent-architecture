@@ -11,7 +11,7 @@
 | Agent Host | Agent Host | 运行 Agent 的应用宿主，提供 Runtime、Policy、Registry、Checkpoint、Sandbox 与扩展生命周期；本身不是 Agent |
 | A2A | Agent-to-Agent | 面向跨系统 Agent 协作的互操作协议类别；与应用内 Handoff 和 MCP 的职责不同 |
 | Agent Card | Agent Card | A2A 中描述远程 Agent 身份、能力、入口和认证要求的可发现元数据；不等于权限授予 |
-| Agent Loop | Agent Loop | Agent 的主循环：Reasoning → Planning → Tool Calling → Observation → Reasoning ... |
+| Agent Loop | Agent Loop | Agent 在单次 Run 内重复“决策 → 受控行动 → Observation → 验证/再规划”的主循环；Planning 可选，具体阶段记法见第 2、9、18 章 |
 | Agent Runtime | Agent Runtime | 管理 Agent 生命周期、调度 Tool 调用、协调各组件的运行环境 |
 | Agentic Workflow | Agentic Workflow | 在确定性 Workflow 边界内嵌入有限 Agent 决策节点的混合架构 |
 | Agentic Engineering | Agentic Engineering | 将 Prompt、Context、Tool、Workflow、Harness、Loop 与评估、安全、运维组合为生产 Agent 系统的工程总框架；不是单个组件 |
@@ -37,13 +37,16 @@
 | Context Window | Context Window | 模型一次能处理的最大 token 数量 |
 | Connector | Connector | 面向具体产品或服务的集成单元，管理服务身份、凭据引用、授权范围、端点、数据映射和健康状态；可基于 MCP、API 或 SDK 实现 |
 | Chain-of-Thought (CoT) | Chain-of-Thought | 通过逐步推理（"让我们一步步思考"）提高复杂问题准确性的 Prompting 技术 |
-| Checkpoint | Checkpoint | Agent 运行状态的快照，用于故障恢复和状态回滚 |
+| Call Receipt | Call Receipt | 持久化的工具派发、提交及结果证据；用于副作用核对，不能由对话摘要或 Trace 副本代替 |
+| Checkpoint | Checkpoint | 某个 Run 在某个 revision 的可恢复快照；用于继续未完成执行，不等于 Memory、Trace 或审计日志 |
 | Circuit Breaker | Circuit Breaker | 当某个操作失败率超过阈值时自动熔断，防止级联故障的保护机制 |
 | CLI | Command-Line Interface | 命令行交互入口，通常通过参数、退出码和帮助信息提供可脚本化、自文档化的操作方式 |
 | Capability | Capability | Host 可向运行主体提供的能力；本书主要包括可调用的 Tool 与可加载的 Skill |
+| Capability Snapshot | Capability Snapshot | 某次 Run 可见的 Tool Schema/来源、Skill 版本、模型能力、Policy 和关键配置的规范化快照；恢复与审批需验证其兼容性 |
 | Catalog | Catalog | 保存已安装对象的版本、来源、完整性与启用状态的安装期索引 |
 | Conversation | Conversation | Session 中面向用户或参与者的消息序列，不等于完整 Runtime 状态 |
 | Credential | Credential | 用于证明身份的 Token、证书或 Secret；应以引用方式管理并限制 Scope 与生命周期 |
+| CredentialRef | Credential Reference | 指向 Secret Manager、Keychain 或工作负载身份中凭据的非 Secret 引用；配置、Checkpoint 和 Trace 不保存解析后的值 |
 
 ## D
 
@@ -71,6 +74,7 @@
 | 术语 | 英文 | 定义 |
 |------|------|------|
 | Guardrails | Guardrails | 分布在输入、模型输出、Tool 调用和最终输出边界的可执行安全与合规控制 |
+| Golden Test | Golden Test | 用已知正确结果、轨迹或结构化断言做确定性回归的测试；开放性任务不宜只做逐字匹配 |
 
 ## H
 
@@ -100,6 +104,7 @@
 | 术语 | 英文 | 定义 |
 |------|------|------|
 | LLM | Large Language Model | 大语言模型，Agent 的推理核心 |
+| LLM-as-Judge | LLM-as-Judge | 使用版本化评分模型和 rubric 评估开放性输出的方法；需用人工样本校准偏差、阈值和一致性 |
 | Loader | Loader | 将静态定义解析为内存对象的组件；加载 Skill/Plugin 不代表执行其中代码 |
 | Loop Engineering | Loop Engineering | 设计跨 Run 的触发、工作发现、隔离执行、验证、状态、预算、停止和人工门禁；属于新兴工作术语 |
 | Model Provider | Model Provider | 提供模型 API、流式协议、Tool Calling 和 Token 统计等能力的服务或本地运行时适配层 |
@@ -109,6 +114,7 @@
 | 术语 | 英文 | 定义 |
 |------|------|------|
 | MCP | Model Context Protocol | 开放协议，标准化 LLM 应用与外部上下文和能力的连接；Server 可提供 Tool、Resource、Prompt 等能力，Client 与 Server 在 Host 中协商使用范围 |
+| MRTR | Multi Round-Trip Requests | MCP 2026-07-28 的多轮请求模式；Server 返回 input_required，Client 补输入后重试原操作，不能与业务副作用重试混淆 |
 | MCP Client | MCP Client | Host 内部为每个 MCP Server 建立连接、消费其能力的协议客户端 |
 | MCP Server | MCP Server | 通过 MCP 协议暴露 Tool、Resource、Prompt 等能力的服务端 |
 | Memory | Memory | Agent 的状态与记忆管理模块，负责存储和检索历史信息 |
@@ -148,6 +154,7 @@
 | RAG | Retrieval-Augmented Generation | 从受控外部知识源检索相关内容并注入上下文的生成方法，强调来源、版本和权限 |
 | Resolver | Resolver | 解析名称、版本、依赖、别名和冲突并生成唯一身份的组件 |
 | Resource | Resource | 外部系统中可读取的数据对象；MCP Resource 是其协议暴露形式之一，不等于 Memory |
+| Replay | Replay | 读取或重演既有事件/结果的机制；默认只读，不得重新产生外部副作用，重新执行需新授权与幂等控制 |
 | 运行主体 | Runtime Subject | 在 Host 内接收目标并执行决策循环的主体，包括顶层 Agent 和被委派的 Subagent |
 
 ## S
@@ -156,7 +163,8 @@
 |------|------|------|
 | Skill | Skill | 可发现、按需加载的工作流知识，告诉 Agent 如何完成任务；随附脚本仍必须通过受控 Tool/Runtime 执行 |
 | Scaffolding | Scaffolding | 影响 Agent 行为的静态或缓慢变化配置集合，如 Profile、Instructions、Policy、Tool Schema 和输出契约 |
-| Sandbox | Sandbox | 隔离的执行环境，限制 Agent 对文件系统和系统命令的访问范围，保障安全性 |
+| Sandbox | Sandbox | 强制 Workspace、Process、Network 与 Secrets 四类资源边界的执行环境；Tool allowlist 或 Prompt 规则不能替代它 |
+| SandboxProfile | Sandbox Profile | 对 Workspace、Process、Network、Secrets 和资源配额进行显式、默认拒绝配置的可审查契约；不等于操作系统级隔离本身 |
 | Session | Session | 多轮交互、参与者身份和可共享状态的作用域；可以包含多个 Task 和 Agent Run |
 | Slash Command | Slash Command | 由用户显式输入的快捷工作流入口，如 `/review`；不自动获得后续高风险操作的批准 |
 | Subagent | Subagent | 由上层 Agent 委派、拥有独立执行上下文和预算的 Agent 实例 |

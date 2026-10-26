@@ -39,9 +39,14 @@ class Memory:
         return self.long_term.get(key)
 
     def estimate_tokens(self) -> int:
-        """估算当前 token 使用量"""
-        total = sum(len(m["content"]) for m in self.short_term)
-        return total // 4  # 粗略估算：4 字符 ≈ 1 token
+        """依赖无关的保守近似；精确预算应使用目标模型 tokenizer。"""
+        total = 0
+        for message in self.short_term:
+            text = message["content"]
+            non_ascii = sum(ord(char) > 127 for char in text)
+            ascii_chars = len(text) - non_ascii
+            total += non_ascii + (ascii_chars + 3) // 4
+        return total
 
     def is_near_limit(self) -> bool:
         """检查是否接近上下文窗口限制"""

@@ -78,10 +78,10 @@ MCP 将「1 对 N」的集成问题转化为「1 对 1 对 N」的标准化问�
 
 ### 1.4 Host、Agent 与 MCP Client 的边界
 
-MCP 官方架构把 Host 定义为容器与协调者：Host 创建 Client、控制连接权限、处理用户授权并聚合上下文；每个 Client 与一个 Server 维持隔离会话。由此可见，Agent 只是发起能力请求的运行主体，不应自己持有传输凭据或绕过 Host 直连 Server。
+MCP 的 Host 负责创建 Client、控制连接权限、处理用户授权并聚合上下文。Host 应按 Server 和身份隔离凭据与能力；这不要求协议必须维持服务端会话。`2025-11-25` 及更早版本使用初始化握手，`2026-07-28` 改为无协议会话的逐请求元数据。Agent 是发起能力请求的运行主体，不应自己持有传输凭据或绕过 Host 直连 Server。
 
 ```text
-Agent / Subagent → Agent Host → MCP Client (每个 Server 一条会话) → MCP Server
+Agent / Subagent → Agent Host → MCP Client (按 Server / 身份隔离) → MCP Server
                          └→ Policy / Consent / Context Isolation
 ```
 
@@ -96,7 +96,8 @@ Agent / Subagent → Agent Host → MCP Client (每个 Server 一条会话) → 
 ```mermaid
 graph TD
     subgraph "Agent 侧"
-        Agent[Agent] --> MC[MCP Client]
+        Agent[Agent] --> Host[Agent Host / Policy]
+        Host --> MC[MCP Client]
     end
 
     subgraph "MCP 协议层"
@@ -127,50 +128,70 @@ graph TD
 | Prompt Template | Server 提供的 Prompt 模板 |
 | Transport | 通信层；当前标准传输为 `stdio` 和 Streamable HTTP，旧版 HTTP+SSE 仅用于兼容 |
 
-> **来源类型：** Fact —— 基于当前 MCP 规范 v2025-11-25（核对日期：2026-07-24）。文中最小示例仍按 v2024-11-05 的基础能力集合讲解，不能直接作为当前协议实现；实现时必须协商双方共同支持的版本，并以 [MCP Versioning](https://modelcontextprotocol.io/docs/learn/versioning) 为准。
+> **版本与验证边界（2026-10-26）：** 当前规范为 `2026-07-28`，参见 [Versioning](https://modelcontextprotocol.io/docs/2026-07-28/learn/versioning)。第 3、4 节保留基于旧版基础消息形状的离线教学模型，不是任何版本的完整兼容实现。真实 Adapter 必须记录实际支持版本，不能把模型中的 `protocol_version` 常量改成新日期就宣称升级完成。
 
-### 2.3 MCP 通信流程
+### 2.3 MCP 通信流程：区分两个协议时代
 
 ```mermaid
 sequenceDiagram
-    participant Agent
+    participant Host as Agent Host
     participant Client as MCP Client
     participant Server as MCP Server
 
-    Agent->>Client: 启动
-    Client->>Server: initialize
-    Server-->>Client: server_info + capabilities
-    Client->>Server: notifications/initialized
-    Client->>Server: tools/list
+    Host->>Client: 按配置选择版本与身份
+    alt 2026-07-28
+        Client->>Server: server/discover（Client 可选）
+        Server-->>Client: versions + capabilities + identity
+        Client->>Server: tools/list + 请求元数据
+    else 2025-11-25 及更早版本
+        Client->>Server: initialize
+        Server-->>Client: server_info + capabilities
+        Client->>Server: notifications/initialized
+        Client->>Server: tools/list
+    end
     Server-->>Client: [Tool 列表]
-    Client->>Agent: 注册 Tool
+    Client->>Host: 交给统一 Registry，应用 Policy
 
-    Agent->>Client: 需要调用 Tool
-    Client->>Server: tools/call(name, args)
+    Host->>Client: 已校验并授权的 Tool 调用
+    Client->>Server: tools/call（按所选版本编码）
     Server->>Server: 执行 Tool
     Server-->>Client: Tool 结果
-    Client-->>Agent: 返回结果
+    Client-->>Host: 返回结果与执行证据
 ```
 
-> **图 13-2：** MCP 通信最小教学时序图。初始化、能力协商、`initialized` 通知、列出 Tool、调用 Tool 的基础顺序；版本协商、认证、取消和重连以当前规范及真实 SDK 为准。
+> **图 13-2：** MCP 通信与版本分支。新版逐请求元数据与旧版初始化握手分开处理；能力发现由 Client 完成，注册、授权和执行治理由 Host 负责。
 
 ### 2.4 能力协商与双向能力
 
-`initialize` 不只是“连通性检查”。Client 和 Server 先协商协议版本与能力，之后只能使用双方已协商的可选能力。第 3、4 节的教学代码只模拟了 Server 侧 Tool；真实 Host 还可能向 Server 提供下列 Client 侧能力。
+旧版 `initialize` 不只是连通性检查，它协商版本与能力；新版不再执行这个握手，而是在每个请求的 `_meta` 中声明版本和 Client 能力。下表描述能力职责，不能据此假定所有版本使用相同的请求方向、通知或字段。
 
 | 提供方 | 能力 | 用途 | Host 的控制点 |
 |--------|------|------|---------------|
 | Server | Tools / Resources / Prompts | 可调用能力、可读资源、模板化提示 | 是否展示给模型、是否允许调用 |
 | Server | Logging / Completions | 结构化日志、参数补全等辅助能力 | 日志脱敏、速率和存储策略 |
-| Client | Roots | 告知 Server 可操作的文件系统或 URI 边界 | 最小范围、路径变化通知 |
+| Client | Roots | 告知 Server 工作区或 URI 范围，不等同于 OS 访问控制 | 最小范围、实际文件权限 |
 | Client | Sampling | 允许 Server 请求 Host 代为进行模型采样 | 用户审批、模型选择、提示词可见性 |
 | Client | Elicitation | 允许 Server 向用户请求额外信息 | UI 呈现、敏感字段限制、取消 |
 
-协商成功不等于授权：Host 仍应对每次数据暴露、采样请求和 Tool 调用执行自己的权限与用户确认策略。对于不支持的能力，应在协商阶段明确关闭，而不是在运行时静默失败。
+能力兼容不等于授权：Host 仍应对每次数据暴露、采样请求和 Tool 调用执行自己的权限与用户确认策略。不支持的能力应明确拒绝或按扩展定义降级。
 
-v2025-11-25 还加入了实验性 Tasks、Sampling 中的 Tool Calling，以及以 JSON Schema 2020-12 作为默认方言。它们不是基础 Tool 流程的必选项：只有双方在初始化时声明并协商对应能力后才能使用，旧客户端也不应被假定支持。
+`2025-11-25` 引入的实验性 Tasks 在 `2026-07-28` 移到 `io.modelcontextprotocol/tasks` 官方扩展。新版还以 Multi Round-Trip Requests（MRTR）承载 Roots、Sampling、Elicitation 等交互：Server 返回 `input_required`，Client 提供输入后重试原操作，不能继续假定 Server 主动发起 JSON-RPC 请求。
 
-> **来源类型：** Fact —— 基于 MCP v2025-11-25 的 Lifecycle、Client Features、Server Features 与 Key Changes；具体 Host 的 UI 和审批策略属于产品实现
+> **来源类型：** Official Fact；核查日期：2026-10-26。依据 [新版变更记录](https://modelcontextprotocol.io/specification/2026-07-28/changelog)与[传输定义](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports)。具体 Host 的 UI、审批与副作用处理属于产品实现。
+
+### 2.5 从旧版迁移的验收表
+
+| 控制点 | `2025-11-25` 及更早版本 | `2026-07-28` | Adapter 应验证什么 |
+|--------|------------------------|--------------|---------------------|
+| 建立语义 | 初始化握手、会话能力 | 每请求版本与能力元数据；Server 必须实现 `server/discover` | 新旧分支独立，拒绝不支持的版本 |
+| HTTP 会话 | 可使用 `Mcp-Session-Id` | 移除协议级会话 | 本地 Session、凭据和业务状态不依赖该 Header |
+| 结果 | 旧结果形状 | `resultType` 区分 `complete` 与 `input_required` | 仅对旧版缺失字段按 `complete` 兼容 |
+| 变更通知 | GET 流及资源订阅 | `subscriptions/listen` | 失效通知刷新能力快照，不扩大已有审批 |
+| 中断恢复 | 某些旧版流可重投递 | 移除 SSE 恢复与消息重投递 | 新 JSON-RPC ID 不等于新的业务幂等键 |
+
+双时代 Client 应按官方[兼容规则](https://modelcontextprotocol.io/specification/2026-07-28/basic/versioning)探测：stdio 可先调用 `server/discover`；HTTP 要区分明确的新协议错误与旧 Server 的响应。认证失败不能作为随意换身份、换端点或放宽授权的理由。
+
+新版断流后需要重新发请求，不代表业务写操作可以安全重做。对于发送、支付或文件提交，先凭下游请求 ID / 幂等键核对结果；无法核对时进入副作用未知状态，交由第 16 章的恢复流程处理。当前示例没有真实传输测试，不能据离线通过推断兼容性。
 
 ---
 
@@ -514,92 +535,25 @@ if __name__ == "__main__":
 
 ## 5. MCP 与 Agent 集成
 
-### 5.1 集成模式
+### 5.1 集成模式：Adapter 接入同一条执行管线
 
-```python
-class MCPIntegratedAgent:
-    """集成 MCP 的 Agent"""
+MCP Client 只负责协议编码、传输和远端结果解释。它不应再维护一套绕过第 11 章 Registry 的执行入口。本节以端口契约替代独立 dispatch 实现，完整组装见[第 16 章](../16-agent-host/README.md)。
 
-    def __init__(self):
-        self.mcp_clients: dict[str, MCPClient] = {}
-        self.builtin_tools: dict[str, Tool] = {}
-        self._all_tools: list[dict] = []
-
-    def add_mcp_server(self, name: str, server: MCPServer):
-        """添加 MCP Server"""
-        client = MCPClient(MCPClientConfig())
-        client.connect(server)
-        self.mcp_clients[name] = client
-
-    def get_all_tools(self) -> list[dict]:
-        """获取所有 Tool（Built-in + MCP）"""
-        tools = []
-
-        # Built-in Tools
-        for tool in self.builtin_tools.values():
-            tools.append({
-                "type": "function",
-                "function": {
-                    "name": tool.name,
-                    "description": tool.description,
-                    "parameters": tool.parameters
-                }
-            })
-
-        # MCP Tools
-        for server_name, client in self.mcp_clients.items():
-            for definition in client.get_tool_definitions():
-                # 模型可见名使用稳定 canonical identity，避免安装顺序改变语义。
-                remote_name = definition["function"]["name"]
-                namespaced = {
-                    **definition,
-                    "function": {
-                        **definition["function"],
-                        "name": f"{server_name}.{remote_name}",
-                    },
-                }
-                tools.append(namespaced)
-
-        return tools
-
-    def execute_tool(self, name: str, arguments: dict) -> dict:
-        """执行 Tool（优先 Built-in，其次 MCP）"""
-        # 先查 Built-in
-        if name in self.builtin_tools:
-            return self.builtin_tools[name].handler(**arguments)
-
-        # MCP Tool 必须带 <server>.<tool>，直接路由到唯一连接。
-        if "." not in name:
-            return {
-                "success": False,
-                "error": f"MCP Tool 必须使用 <server>.<tool>: {name}",
-                "code": "invalid_tool_identity",
-            }
-        server_name, remote_name = name.split(".", 1)
-        client = self.mcp_clients.get(server_name)
-        if client is None:
-            return {
-                "success": False,
-                "error": f"MCP Server 不存在: {server_name}",
-                "code": "server_not_found",
-            }
-        if remote_name not in {tool["name"] for tool in client.list_tools()}:
-            return {
-                "success": False,
-                "error": f"MCP Tool 不存在: {name}",
-                "code": "tool_not_found",
-            }
-        result = client.call_tool(remote_name, arguments)
-        if result.get("isError") or "error" in result:
-            return {
-                "success": False,
-                "error": result.get("error", result.get("content", "MCP Tool 调用失败")),
-                "code": "tool_call_failed",
-            }
-        return {"success": True, "result": result}
+```text
+Server 配置与身份 → 版本 / 能力发现 → MCP Provider Adapter
+→ Tool Registry（稳定身份、来源、Schema、版本）
+→ Runtime → 参数校验 → Policy → Approval → MCP Client.call_tool
+→ Observation / Artifact → 执行回执 / Trace
 ```
 
-这里不能遍历所有 Server 并把“没有 `isError`”当作成功：不同教学 Client 可能用 `error` 字段表达失败，首个 Server 的 `tool_not_found` 也不应阻止路由到目标 Server。canonical name 让路由在调用前就唯一确定，并把 Server 不存在、Tool 不存在和远端执行失败分开建模。
+| 边界 | 应保留的信息 | 失败行为 |
+|------|--------------|----------|
+| 发现 | Server 身份、远端 Tool 名、Schema、实现修订 | 身份或 Schema 冲突阻止注册 |
+| 运行快照 | canonical Tool ID、身份引用、能力 Hash | Server 更新不能静默替换进行中的能力 |
+| 调用 | 原始远端名称、请求 ID、业务幂等键、取消信号 | 不遍历所有 Server 猜测命中，不把超时当成未执行 |
+| 返回 | 协议错误、Tool 业务错误、结构化结果、产物引用 | 映射到统一错误契约，保留原因与副作用状态 |
+
+canonical ID 由 Host 分配，远端名称单独保存；不要依赖对任意字符串执行 `split(".", 1)` 还原身份。Builtin、MCP、Plugin Tool 使用相同的授权、预算与审计入口，Adapter 不拥有额外权限。
 
 ---
 
@@ -614,7 +568,7 @@ add / remove / enable / disable
         ↓
 connect_enabled → start_enabled → TransportFactory.connect
         ↓
-initialize / tools/list → Provider Adapter → Tool Registry
+按版本发现能力 / tools/list → Provider Adapter → Tool Registry
         ↓
 tools/call；refresh / stop / close
 ```
@@ -629,7 +583,7 @@ python main.py --config .agent/mcp.json list
 python main.py --config .agent/mcp.json disable catalog
 ```
 
-Python/TypeScript 离线 Manager 教学契约位于 `examples/mcp-manager/`；`examples/mcp-client/` 与 `examples/mcp-server/` 也明确标记为协议模型。它们验证 Host 管理、消息形状和 Tool 适配边界，不声称是当前 MCP Transport 的兼容实现。生产 Adapter 应使用官方 SDK 实现真实初始化、版本/能力协商、`stdio` 进程或 Streamable HTTP、OAuth、超时、重连和 Server 身份验证。
+Python/TypeScript 离线 Manager 教学契约位于 `examples/mcp-manager/`；`examples/mcp-client/` 与 `examples/mcp-server/` 也明确标记为协议模型。它们验证 Host 管理、消息形状和 Tool 适配边界，不声称是当前 MCP Transport 的兼容实现。生产 Adapter 应选择明确支持目标版本的 SDK，实现对应的初始化或逐请求元数据、版本兼容、`stdio` 进程或 Streamable HTTP、OAuth、超时、重连和 Server 身份验证。
 
 ### 5.3 Connector：具体产品的集成层
 
@@ -718,9 +672,9 @@ A2A 适合跨团队、跨供应商、跨语言或不同信任边界的 Agent 协
 |------|------|----------|
 | Agent Card | 描述 Agent 身份、能力、技能、接口、认证和支持的交互方式 | 来源、版本和认证要求必须在调用前验证 |
 | Message | 发起任务、补充输入、请求澄清或传递上下文 | 不是可靠的最终结果存储 |
-| Task | 跨请求持续存在的工作单元 | 由 Server 分配 `taskId`，不能用客户端任意字符串创建新任务 |
+| Task | 跨请求持续存在的工作单元 | 由 Server 分配 Task 身份；字段映射按实际版本，不能用客户端任意字符串创建新任务 |
 | Artifact | Task 产生的文件、结构化数据或其他交付物 | 通过引用、媒体类型、大小和校验和访问 |
-| Task Status | 描述任务当前进度和终态 | `working`、`input-required`、`completed` 等必须区分 |
+| Task Status | 描述任务当前进度和终态 | 工作、待输入和完成必须区分；下图是概念别名，不是线格式枚举 |
 | Status/Artifact Event | 推送状态变化或增量产物 | Streaming、Polling、Push 只是传输方式，不改变任务语义 |
 
 一个 A2A `contextId` 可以将多个相关 Task 和 Message 组织在同一个交互上下文中；它不等同于本书 Host 内部的 `session_id`。A2A `taskId` 是远程 Server 管理的协议任务，也不等同于本地 `run_id`。
@@ -733,22 +687,24 @@ stateDiagram-v2
     Submitted --> Working: Agent 接管任务
     Working --> InputRequired: 需要补充信息
     InputRequired --> Working: 继续发送消息
-    Working --> ApprovalRequired: 等待外部审批
-    ApprovalRequired --> Working: 批准或修改
-    ApprovalRequired --> Canceled: 拒绝或取消
-    Working --> ArtifactReady: 产生 Artifact
-    ArtifactReady --> Working: 仍有后续步骤
+    Working --> AuthRequired: 需要补充认证
+    AuthRequired --> Working: 认证完成
+    Submitted --> Rejected: Agent 拒绝任务
+    Working --> Rejected: Agent 拒绝继续处理
     Working --> Completed: 验证通过
     Working --> Failed: 不可恢复错误
     Working --> Canceled: 客户端取消
     Completed --> [*]
     Failed --> [*]
     Canceled --> [*]
+    Rejected --> [*]
 ```
 
-> **图 13-3：** A2A Task 的教学生命周期。真实规范版本可能增加或调整状态；`completed` 只表示协议任务进入终态，不代表下游副作用已经被业务方确认。
+> **图 13-3：** A2A v1.0 Task 状态的概念映射。图中名称便于阅读，不是线格式枚举；审批和 Artifact 不是独立 TaskState。协议完成不代表下游副作用已经被业务方确认。
 
 任务状态至少应携带 `task_id`、`context_id`、状态、事件序号、时间戳和原因。长任务还需要定义超时、过期、取消请求、重试和恢复语义。网络超时不能直接推断远程 Tool 未执行，重试不可逆操作必须使用幂等键和下游执行标识。
+
+官方 v1.0 JSON 映射采用 ProtoJSON：例如工作状态为 `TASK_STATE_WORKING`，完成为 `TASK_STATE_COMPLETED`，而非直接发送本书示例里的 `working / completed`。Agent Card 的 `supportedInterfaces` 分别声明 `protocolBinding` 与 `protocolVersion`；旧版 `kind` 判别字段等消息形状不能原样套用。内部 `task_id / context_id` 应由 Adapter 映射到相应协议字段，不能把教学字典直接序列化到网络。[A2A 规范与兼容说明](https://a2a-protocol.org/latest/specification/)（核查日期：2026-10-26）
 
 ### 6.4 Agent Card、授权与版本
 
@@ -797,7 +753,7 @@ flowchart TB
 
 示例没有实现完整的 HTTP/REST、gRPC、认证服务器、服务发现或持久化队列；生产实现还必须补充 Agent Card 来源验证、协议版本协商、身份认证、取消传播、重试、Artifact 保留和审计。
 
-> **来源类型：** Fact + 工程推导 —— A2A 的规范事实以 [官方规范](https://github.com/a2aproject/A2A/blob/main/docs/specification.md) 为准；本书对 Host Policy、幂等、Artifact 访问和教学实现边界的说明属于工程约束。
+> **来源类型：** Fact + 工程推导 —— A2A 的规范事实以 [官方规范](https://a2a-protocol.org/latest/specification/) 为准；本书对 Host Policy、幂等、Artifact 访问和教学实现边界的说明属于工程约束。
 
 ## 7. MCP Transport 层
 
@@ -811,10 +767,10 @@ flowchart TB
 
 ### 7.2 安全考量
 
-- **Tool 白名单：** Agent 应维护允许调用的 Tool 白名单
+- **Tool 白名单：** Host 应维护每次运行允许调用的 Tool 白名单
 - **权限确认：** 敏感操作（文件写入、网络请求）需要用户确认
 - **沙箱隔离：** MCP Server 应在受限环境中运行
-- **输入校验：** Agent 应校验 MCP Server 返回的数据
+- **输入校验：** Host 应校验 MCP Server 返回的数据，外部内容不能成为新的授权来源
 
 ### 7.3 远程 MCP 的授权边界
 
@@ -824,13 +780,15 @@ flowchart TB
 |------|--------------|
 | 发现与连接 | Server 身份、传输加密、允许的 Origin、授权 Server 元数据 |
 | 获取令牌 | 令牌的目标资源、最小 Scope、用户同意与安全存储 |
-| 发起请求 | 每个 HTTP 请求携带正确的授权信息和已协商的协议版本 |
+| 发起请求 | 每个 HTTP 请求携带正确的授权信息和该请求所用版本，按版本验证 Header 与消息体 |
 | Server 校验 | 令牌有效期、受众（audience）是否为本 Server、Scope 与请求是否匹配 |
 | 下游访问 | 不透传 Client 给 MCP Server 的令牌；由 Server 以独立凭据访问下游服务 |
 
+持久化 Client 凭据应绑定授权服务器 issuer，不能换一个授权服务器继续复用；授权响应提供 `iss` 时应按规范校验。
+
 令牌存在并不表示模型可以自由操作：Host 仍需在 Tool 层应用白名单、参数校验、人工确认和审计。认证、协议能力和业务授权是三层不同控制，任意一层缺失都可能扩大权限。
 
-> **来源类型：** Fact + 推导分析 —— 授权机制依据 MCP v2025-11-25 Authorization；Tool 级审批是本书的 Host 安全设计建议
+> **来源类型：** Fact + 推导分析 —— 授权机制依据 MCP v2026-07-28 Authorization（核查日期：2026-10-26）；Tool 级审批是本书的 Host 安全设计建议
 
 ---
 
@@ -868,7 +826,7 @@ MCP 是面向 LLM 应用的上下文和能力协议，提供 Tool、Resource、P
 
 ### Q: 一个 Agent 可以连接多个 MCP Server 吗？
 
-可以。这是 MCP 的核心设计目标之一。Agent 可以同时连接文件系统 Server、数据库 Server、第三方 API Server 等，所有 Tool 统一管理。
+可以。Host 为各 Server 管理隔离的身份和 Client，经 Provider Adapter 将获准能力注册到统一 Registry；Agent 只看到本次运行的能力快照。多 Server 不应产生多条绕过治理的执行管线。
 
 ### Q: MCP 和 A2A 应该如何选择？
 
@@ -884,11 +842,12 @@ MCP 是面向 LLM 应用的上下文和能力协议，提供 Tool、Resource、P
 | REF-2 | [MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk) | 源码 | 官方 Python SDK |
 | REF-3 | [MCP TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk) | 源码 | 官方 TypeScript SDK |
 | REF-4 | [Awesome MCP Servers](https://github.com/punkpeye/awesome-mcp-servers) | 社区 | 社区 MCP Server 列表 |
-| REF-5 | [MCP Lifecycle](https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle) | 官方规范 | 初始化、能力协商、超时与关闭 |
-| REF-6 | [MCP Authorization](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization) | 官方规范 | HTTP 传输的授权边界 |
-| REF-7 | [MCP v2025-11-25 Key Changes](https://modelcontextprotocol.io/specification/2025-11-25/changelog) | 官方规范 | Tasks、Schema 与授权等版本变化 |
-| REF-8 | [MCP Architecture](https://modelcontextprotocol.io/specification/2025-11-25/architecture) | 官方规范 | Host、Client、Server 的职责和一对一会话边界 |
-| REF-9 | [A2A Protocol Specification](https://github.com/a2aproject/A2A/blob/main/docs/specification.md) | 官方规范 | Agent Card、Task、Message、Artifact 与任务生命周期 |
+| REF-5 | [MCP Legacy Lifecycle](https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle) | 官方规范 | 旧版初始化与能力协商，供兼容实现使用 |
+| REF-6 | [MCP Authorization](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization) | 官方规范 | HTTP 传输的授权边界 |
+| REF-7 | [MCP v2026-07-28 Key Changes](https://modelcontextprotocol.io/specification/2026-07-28/changelog) | 官方规范 | 无状态请求、MRTR、Tasks 扩展与传输变化 |
+| REF-8 | [MCP Architecture](https://modelcontextprotocol.io/specification/2025-11-25/architecture) | 官方规范 | 旧版 Host、Client、Server 架构；会话语义不能外推至新版 |
+| REF-9 | [A2A Protocol Specification](https://a2a-protocol.org/latest/specification/) | 官方规范 | Agent Card、Task、Message、Artifact 与任务生命周期 |
+| REF-11 | [MCP Version Compatibility](https://modelcontextprotocol.io/specification/2026-07-28/basic/versioning) | 官方规范 | 逐请求版本、新旧时代探测与兼容矩阵 |
 | REF-10 | [A2A Project](https://a2a-protocol.org/) | 官方项目 | A2A 的定位、实现与生态入口 |
 
 ---
@@ -916,6 +875,7 @@ Connector 则位于具体产品集成层，管理服务身份、凭据引用、�
 - [ ] 能实现 MCP Server 和 MCP Client
 - [ ] 理解 MCP 与 Function Calling 的关系
 - [ ] 理解 MCP 的安全考量
+- [ ] 能区分旧版初始化握手与新版逐请求元数据，并解释断流后的副作用核对
 - [ ] 能区分协议 `MCPClient` 与 Host 的 `MCPServerManager`
 - [ ] 能区分 Tool、MCP、Connector 与 Plugin 的职责
 - [ ] 能持久化、启停、刷新并安全卸载 MCP Server

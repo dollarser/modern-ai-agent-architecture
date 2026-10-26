@@ -50,6 +50,7 @@ class PolicyRequest:
     run_id: str
     source: str
     risk: str
+    invoked_as: str = ""
 
 
 class PolicyEngine(Protocol):
@@ -68,9 +69,13 @@ class DefaultPolicyEngine:
         layered_allow, self.denied_tools = merge_policy_layers(layers or [])
         self.allowed_tools = frozenset(set(allowed_tools).union(layered_allow))
 
+    def snapshot(self) -> dict[str, Any]:
+        return {"allow": sorted(self.allowed_tools), "deny": sorted(self.denied_tools)}
+
     def evaluate(self, request: PolicyRequest) -> PolicyDecision:
         if (
             request.capability in self.denied_tools
+            or request.invoked_as in self.denied_tools
             or request.capability not in self.allowed_tools
         ):
             return PolicyDecision.DENY

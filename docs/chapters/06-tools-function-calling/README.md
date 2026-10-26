@@ -268,19 +268,34 @@ class FileReadTool:
             root = Path(self.workspace_root).resolve(strict=True)
             target = (root / path).resolve(strict=True)
             if not target.is_relative_to(root) or not target.is_file():
-                return {"success": False, "error": "路径不在允许工作区内"}
+                return {
+                    "success": False, "error_code": "policy_denied",
+                    "error_message": "路径不在允许工作区内",
+                    "retryable": False, "details": {},
+                }
             with target.open("r", encoding="utf-8") as f:
                 content = f.read(self.max_bytes + 1)
             if len(content.encode("utf-8")) > self.max_bytes:
                 return {
                     "success": False,
-                    "error": "文件超过 Tool 返回上限，请使用分页读取",
+                    "error_code": "invalid_arguments",
+                    "error_message": "文件超过 Tool 返回上限，请使用分页读取",
+                    "retryable": False,
+                    "details": {"max_bytes": self.max_bytes},
                 }
             return {"success": True, "content": content, "path": str(target.relative_to(root))}
         except FileNotFoundError:
-            return {"success": False, "error": f"文件不存在: {path}"}
+            return {
+                "success": False, "error_code": "invalid_arguments",
+                "error_message": f"文件不存在: {path}",
+                "retryable": False, "details": {},
+            }
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            return {
+                "success": False, "error_code": "handler_error",
+                "error_message": type(e).__name__,
+                "retryable": False, "details": {},
+            }
 ```
 
 > **来源类型：** Fact —— 基于 Anthropic Tool Use 的 Tool 定义格式
@@ -353,14 +368,15 @@ final_messages = request_messages + [response, tool_result]
 """
 Function Calling 教学实现
 运行环境：Python 3.10+
-依赖：openai>=1.0.0
-注意：本节代码引用前文定义的 Tool 类和 FunctionCall 等结构，
-可运行教学版本见 `examples/tool-calling/`；它演示 Function Calling 流程，不覆盖生产级 Provider、Policy、Approval、Sandbox 或审计。
+依赖：openai>=1.0.0, jsonschema>=4.0
+注意：本节代码引用前文定义的 Tool 类和 FunctionCall 等结构，是正文契约摘录，
+不与 `examples/tool-calling/` 逐字相同。独立示例演示同一概念并额外包含安全计算器、Workspace 文件边界和错误用例；两者都不覆盖生产级 Provider、Policy、Approval、Sandbox 或审计。
 预期输出：Function Calling 教学流程演示
 """
 
 import json
 from typing import Any
+from jsonschema import ValidationError, validate
 
 
 class ToolExecutor:
@@ -391,13 +407,35 @@ class ToolExecutor:
         """执行 Tool"""
         tool = self._tools.get(name)
         if not tool:
-            return {"success": False, "error": f"Tool 不存在: {name}"}
+            return {
+                "success": False,
+                "error_code": "tool_not_found",
+                "error_message": f"Tool 不存在: {name}",
+                "retryable": False,
+                "details": {},
+            }
 
         try:
+            # Schema 校验在 Handler 前统一执行；Handler 再检查业务前置条件。
+            validate(instance=arguments, schema=tool.parameters)
             result = tool.handler(**arguments)
             return result
+        except ValidationError as e:
+            return {
+                "success": False,
+                "error_code": "invalid_arguments",
+                "error_message": e.message,
+                "retryable": False,
+                "details": {"path": list(e.path)},
+            }
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            return {
+                "success": False,
+                "error_code": "handler_error",
+                "error_message": type(e).__name__,
+                "retryable": False,
+                "details": {},
+            }
 
     def execute_tool_call(self, tool_call: dict) -> dict:
         """从 Function Call 响应中执行 Tool"""
@@ -488,7 +526,7 @@ if __name__ == "__main__":
 ==================================================
 ```
 
-> **运行方式：** 见 `examples/tool-calling/python/main.py`
+> **独立可运行示例：** `examples/tool-calling/python/main.py`。其工具数量、用例和输出与上面的正文摘录不同，不应把该命令当作本代码块的逐字运行入口。
 
 ---
 
@@ -540,14 +578,18 @@ class SafeToolExecutor(ToolExecutor):
         if not tool:
             return {
                 "success": False,
-                "error": f"Tool '{name}' 不存在",
-                "retryable": False
+                "error_code": "tool_not_found",
+                "error_message": f"Tool '{name}' 不存在",
+                "retryable": False,
+                "details": {},
             }
         if getattr(tool, "side_effect", False) and not idempotency_key:
             return {
                 "success": False,
-                "error": "副作用 Tool 必须提供 idempotency_key",
+                "error_code": "invalid_arguments",
+                "error_message": "副作用 Tool 必须提供 idempotency_key",
                 "retryable": False,
+                "details": {},
             }
 
         import random
@@ -566,32 +608,42 @@ class SafeToolExecutor(ToolExecutor):
                 if not can_retry:
                     return {
                         "success": False,
-                        "error": e.message,
+                        "error_code": "handler_error",
+                        "error_message": e.message,
                         "retryable": e.retryable,
-                        "attempts": attempt + 1
+                        "details": {"attempts": attempt + 1},
                     }
                 # 指数退避 + 抖动；真实实现还应尊重下游 Retry-After。
                 time.sleep(min(2 ** attempt * 0.1 + random.random() * 0.05, 2.0))
             except Exception as e:
                 return {
                     "success": False,
-                    "error": f"未知错误: {str(e)}",
+                    "error_code": "handler_error",
+                    "error_message": type(e).__name__,
                     "retryable": False,
-                    "attempts": attempt + 1
+                    "details": {"attempts": attempt + 1},
                 }
 
         # 注意：此处不会执行到，因为 for 循环内所有路径都已 return
         # 保留此返回作为安全守卫
-        return {"success": False, "error": "达到最大重试次数"}
+        return {
+            "success": False,
+            "error_code": "handler_error",
+            "error_message": "达到最大重试次数",
+            "retryable": False,
+            "details": {},
+        }
 ```
+
+检查 `idempotency_key` 存在只是在执行前建立契约，并不会自动产生幂等性。Tool 必须把该键传给下游写操作，或用它查询/去重已经提交的副作用；否则进程在“下游提交成功、结果尚未保存”之间崩溃时仍可能重复写入。
 
 ---
 
 ## 7. 最佳实践
 
 1. **Tool 描述要精准：** 名称、描述、schema 与当前候选集共同影响模型选择。明确说明 Tool 的功能、使用场景、参数约束和限制；执行前仍须由应用校验权限与输入。
-2. **参数校验要严格：** 在 Tool handler 中校验所有参数，不要依赖模型的输出一定正确。
-3. **返回结构化结果：** 所有 Tool 返回统一的结构化格式，包含 `success` 字段标记执行状态。
+2. **参数校验要分层：** Registry/Router 在 Handler 前按 JSON Schema 统一校验；Handler 再校验资源状态和业务前置条件。不要依赖模型的输出一定正确。
+3. **返回结构化结果：** 所有 Tool 失败统一映射为 `success / error_code / error_message / retryable / details`，与全书错误契约一致。
 4. **处理部分失败：** 当多个 Tool 并行调用时，处理部分成功部分失败的情况。
 5. **控制 Tool 数量：** 注册的 Tool 过多会导致模型选择困难。合理分组，按需注册。
 6. **Tool 幂等性：** 对于有副作用的 Tool（如发送邮件），确保支持幂等调用。
@@ -605,7 +657,7 @@ class SafeToolExecutor(ToolExecutor):
 | 反模式 | 风险 | 推荐方案 |
 |--------|------|---------|
 | Tool 描述模糊 | 模型错误选择 Tool | 描述精确、包含使用场景和限制 |
-| 参数无校验 | 异常输入导致错误 | Handler 中严格校验所有参数 |
+| 参数无校验 | 异常输入导致错误 | Execute 前统一做 Schema 校验，Handler 再做业务校验 |
 | Tool 数量失控 | 模型选择困难，延迟增加 | 合理分组，动态注册，按场景裁剪 |
 | 忽略 Tool 错误 | 错误传播，Agent 行为异常 | 统一错误处理，返回结构化错误信息 |
 | 同步阻塞调用 | Agent 响应慢 | 对独立 Tool 使用并行调用 |
@@ -653,7 +705,7 @@ Tool 调用失败时，将错误信息作为 Tool 结果返回给模型。模型
 
 - [MCP Specification](https://modelcontextprotocol.io/specification) —— MCP 协议的 Tool 定义规范
 - [OpenAI Function Calling Best Practices](https://platform.openai.com/docs/guides/function-calling/best-practices) —— OpenAI 官方最佳实践
-- [Building Reliable Agents with Tool Use](https://www.anthropic.com/engineering/building-reliable-agents) —— Anthropic 工程博客
+- [Writing effective tools for AI agents](https://www.anthropic.com/engineering/writing-tools-for-agents) —— Anthropic 工程博客
 
 ---
 
