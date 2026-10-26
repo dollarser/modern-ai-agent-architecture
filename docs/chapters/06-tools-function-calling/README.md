@@ -704,7 +704,7 @@ Tool 调用失败时，将错误信息作为 Tool 结果返回给模型。模型
 ## 11. 延伸阅读
 
 - [MCP Specification](https://modelcontextprotocol.io/specification) —— MCP 协议的 Tool 定义规范
-- [OpenAI Function Calling Best Practices](https://platform.openai.com/docs/guides/function-calling/best-practices) —— OpenAI 官方最佳实践
+- [OpenAI Function Calling Best Practices](https://developers.openai.com/api/docs/guides/function-calling#best-practices-for-defining-functions) —— OpenAI 官方最佳实践
 - [Writing effective tools for AI agents](https://www.anthropic.com/engineering/writing-tools-for-agents) —— Anthropic 工程博客
 
 ---

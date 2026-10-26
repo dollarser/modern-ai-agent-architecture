@@ -855,7 +855,7 @@ MCP 是面向 LLM 应用的上下文和能力协议，提供 Tool、Resource、P
 ## 12. 延伸阅读
 
 - [MCP Architecture Overview](https://modelcontextprotocol.io/docs/concepts/architecture) —— MCP 架构详解
-- [Building MCP Servers](https://modelcontextprotocol.io/docs/concepts/server) —— 官方 Server 开发指南
+- [Building MCP Servers](https://modelcontextprotocol.io/docs/develop/build-server) —— 官方 Server 开发指南
 - [Claude Code MCP Integration](https://docs.anthropic.com/en/docs/claude-code/mcp) —— Claude Code 的 MCP 集成
 
 ---

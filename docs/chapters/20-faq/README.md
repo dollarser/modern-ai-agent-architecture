@@ -246,7 +246,7 @@ Policy 计算 `allow/ask/deny`；Approval 持久化 `ask` 的决定；Guardrails
 | [MCP Specification](https://modelcontextprotocol.io/) | MCP 协议完整规范 |
 | [OpenAI API Docs](https://platform.openai.com/docs/) | OpenAI API 文档 |
 | [Anthropic Docs](https://docs.anthropic.com/) | Anthropic Claude 文档 |
-| [LangGraph Docs](https://langchain-ai.github.io/langgraph/) | LangGraph 官方文档 |
+| [LangGraph Docs](https://docs.langchain.com/oss/python/langgraph/overview) | LangGraph 官方文档 |
 | [OpenAI Agents SDK](https://openai.github.io/openai-agents-python/) | OpenAI Agents SDK 文档 |
 | [Claude Code Docs](https://docs.anthropic.com/en/docs/claude-code) | Claude Code 文档 |
 | [GitHub Copilot Docs](https://docs.github.com/en/copilot) | Copilot 文档 |

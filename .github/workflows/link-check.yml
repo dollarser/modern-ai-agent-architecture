@@ -2,15 +2,20 @@ name: Link Check
 
 on:
   push:
+    branches: [main]
     paths:
       - '**/*.md'
       - 'examples/**/*.py'
       - 'scripts/check_code_sources.py'
+      - 'scripts/check_external_links.py'
+      - '.github/workflows/link-check.yml'
   pull_request:
     paths:
       - '**/*.md'
       - 'examples/**/*.py'
       - 'scripts/check_code_sources.py'
+      - 'scripts/check_external_links.py'
+      - '.github/workflows/link-check.yml'
   schedule:
     - cron: '0 0 * * 0'  # Weekly on Sunday
 
@@ -23,13 +28,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          node-version: '20'
-
-      - name: Install markdown-link-check
-        run: npm install -g markdown-link-check@3.15.0
+          python-version: '3.12'
 
       - name: Check internal links
         run: python scripts/check_internal_links.py .

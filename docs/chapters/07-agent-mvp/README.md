@@ -280,7 +280,7 @@ Python 测试文件 `examples/agent-mvp-minimal/python/test_main.py` 覆盖以�
 | 编号 | 来源 | 类型 | 说明 |
 |------|------|------|------|
 | REF-1 | [OpenAI Agents SDK](https://openai.github.io/openai-agents-python/) | 官方文档 | Agent 实现参考 |
-| REF-2 | [LangGraph Quickstart](https://langchain-ai.github.io/langgraph/tutorials/introduction/) | 官方文档 | Agent 构建指南 |
+| REF-2 | [LangGraph Quickstart](https://docs.langchain.com/oss/python/langgraph/quickstart) | 官方文档 | Agent 构建指南 |
 | REF-3 | [Building Effective Agents](https://www.anthropic.com/research/building-effective-agents) | 博文 | Agent / Workflow 取舍原则 |
 
 ---

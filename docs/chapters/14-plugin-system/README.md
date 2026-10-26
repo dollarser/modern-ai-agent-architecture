@@ -557,7 +557,7 @@ Plugin 是 Host 可安装、启用和隔离的扩展单元，可以打包 Tool�
 | 编号 | 来源 | 类型 | 说明 |
 |------|------|------|------|
 | REF-1 | [VS Code Extension API](https://code.visualstudio.com/api) | 官方文档 | Plugin 系统的经典参考 |
-| REF-2 | [OpenAI Plugins (Archived)](https://platform.openai.com/docs/plugins) | 官方文档 | 早期的 Agent Plugin 尝试 |
+| REF-2 | [OpenAI MCP Servers](https://developers.openai.com/api/docs/guides/tools-connectors-mcp) | 官方文档 | 外部能力的 MCP 接入参考 |
 | REF-3 | [Chrome Extension Manifest](https://developer.chrome.com/docs/extensions/mv3/manifest/) | 官方文档 | Manifest 设计参考 |
 | REF-4 | [OpenClaw Tools and Plugins](https://github.com/openclaw/openclaw/blob/main/docs/tools/index.md) | 开源仓库文档 | Tool、Skill、Plugin 的分层与运行期能力过滤 |
 | REF-5 | [Codex Plugin Structure](https://developers.openai.com/codex/plugins/build#plugin-structure) | 官方文档 | Plugin 打包 Skills、MCP、Apps、Hooks 与资源的产品实例 |

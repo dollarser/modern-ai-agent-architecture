@@ -12,7 +12,7 @@
 | REF-004 | Claude Code Documentation | [docs.anthropic.com](https://docs.anthropic.com/en/docs/claude-code) | 第 19 章 |
 | REF-005 | GitHub Copilot Documentation | [docs.github.com](https://docs.github.com/en/copilot) | 第 19 章 |
 | REF-006 | OpenAI Agents SDK | [openai.github.io](https://openai.github.io/openai-agents-python/) | 第 19 章 |
-| REF-007 | LangGraph Documentation | [langchain-ai.github.io/langgraph](https://langchain-ai.github.io/langgraph/) | 第 19 章 |
+| REF-007 | LangGraph Documentation | [langchain-ai.github.io/langgraph](https://docs.langchain.com/oss/python/langgraph/overview) | 第 19 章 |
 | REF-008 | Continue Documentation | [docs.continue.dev](https://docs.continue.dev/) | 第 19 章 |
 | REF-009 | Cursor Documentation | [docs.cursor.com](https://docs.cursor.com/) | 第 19 章 |
 | REF-010 | A2A Protocol Specification | [github.com/a2aproject/A2A](https://a2a-protocol.org/latest/specification/) | 第 13、15、16、20 章 |

@@ -979,7 +979,7 @@ Agent 主循环可以实现为 ReAct 的工程化扩展，但不应固定为 Rea
 | REF-1 | [ReAct Paper](https://arxiv.org/abs/2210.03629) (Yao et al., 2022) | 论文 | Agent 循环的基础范式 |
 | REF-2 | [OpenAI Agents SDK](https://github.com/openai/openai-agents-python) | 源码 | Agent Runtime 的参考实现 |
 | REF-3 | [Anthropic Claude Code Architecture](https://docs.anthropic.com/en/docs/claude-code) | 官方文档 | Claude Code 的架构设计 |
-| REF-4 | [LangGraph Documentation](https://langchain-ai.github.io/langgraph/) | 官方文档 | 图状态机在 Agent 中的应用 |
+| REF-4 | [LangGraph Documentation](https://docs.langchain.com/oss/python/langgraph/overview) | 官方文档 | 图状态机在 Agent 中的应用 |
 | REF-5 | [Google ADK](https://adk.dev/) | 开源框架 | Agent、Session、Memory、MCP、A2A 和多语言开发 |
 | REF-6 | [Pydantic AI](https://github.com/pydantic/pydantic-ai) | 开源框架 | 类型安全、依赖注入、评估与可观测性 |
 | REF-7 | [OpenHands](https://github.com/OpenHands/OpenHands) | 开源项目 | Agent Server、工作区、沙箱和自动化 |

@@ -535,7 +535,7 @@ Agent Loop 是 Runtime 的核心循环（Reasoning →〔可选的 Planning〕�
 | 编号 | 来源 | 类型 | 说明 |
 |------|------|------|------|
 | REF-1 | [OpenAI Agents SDK](https://github.com/openai/openai-agents-python) | 源码 | Agent Runtime 的参考实现 |
-| REF-2 | [LangGraph Runtime](https://langchain-ai.github.io/langgraph/) | 官方文档 | 图状态机 Runtime |
+| REF-2 | [LangGraph Runtime](https://docs.langchain.com/oss/python/langgraph/overview) | 官方文档 | 图状态机 Runtime |
 | REF-3 | [Claude Code Architecture](https://docs.anthropic.com/en/docs/claude-code) | 官方文档 | Claude Code 的 Runtime 设计 |
 
 ---

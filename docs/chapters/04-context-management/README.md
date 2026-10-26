@@ -586,7 +586,7 @@ if __name__ == "__main__":
 
 | 编号 | 来源 | 类型 | 说明 |
 |------|------|------|------|
-| REF-1 | [OpenAI Token Usage](https://platform.openai.com/docs/guides/tokens) | 官方文档 | Token 计数和管理 |
+| REF-1 | [OpenAI Token Usage](https://developers.openai.com/api/docs/guides/token-counting) | 官方文档 | Token 计数和管理 |
 | REF-2 | [Anthropic Context Windows](https://docs.anthropic.com/en/docs/build-with-claude/context-windows) | 官方文档 | 上下文窗口管理 |
 | REF-3 | [Lost in the Middle](https://arxiv.org/abs/2307.03172) (Liu et al., 2023) | 论文 | 长上下文中的注意力分布研究 |
 | REF-4 | [MemGPT](https://arxiv.org/abs/2310.08560) (Packer et al., 2023) | 论文 | 虚拟内存管理在 LLM 中的应用 |
