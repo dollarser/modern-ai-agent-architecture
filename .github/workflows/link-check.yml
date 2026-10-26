@@ -8,6 +8,7 @@ on:
       - 'examples/**/*.py'
       - 'scripts/check_code_sources.py'
       - 'scripts/check_external_links.py'
+      - 'specs/book/link-evidence.json'
       - '.github/workflows/link-check.yml'
   pull_request:
     paths:
@@ -15,6 +16,7 @@ on:
       - 'examples/**/*.py'
       - 'scripts/check_code_sources.py'
       - 'scripts/check_external_links.py'
+      - 'specs/book/link-evidence.json'
       - '.github/workflows/link-check.yml'
   schedule:
     - cron: '0 0 * * 0'  # Weekly on Sunday

@@ -549,7 +549,9 @@ stateDiagram-v2
     Interrupted --> Running: 同一 Task / resumed=true
     Running --> ReconciliationRequired: 超时 / 发现未收尾派发
     ReconciliationRequired --> [*]: unknown_side_effect / 禁止自动重放
-    Running --> Completed: 所有步骤成功
+    Running --> Finalizing: 所有 Tool 成功
+    Finalizing --> Completed: 答案已保存
+    Finalizing --> Failed: 答案生成失败
     Running --> Failed: Guard / Tool / Runtime 错误
     Completed --> Replayed: 读取已保存答案，不调用模型
     Replayed --> [*]: replayed=true / resumed=false
