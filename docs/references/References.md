@@ -8,17 +8,35 @@
 |------|------|------|---------|
 | REF-001 | OpenAI Function Calling Documentation | [platform.openai.com](https://platform.openai.com/docs/guides/function-calling) | 第6章 |
 | REF-002 | Anthropic Tool Use Documentation | [docs.anthropic.com](https://docs.anthropic.com/en/docs/build-with-claude/tool-use) | 第6章 |
-| REF-003 | MCP Specification v2025-11-25 | [modelcontextprotocol.io](https://modelcontextprotocol.io/specification/2025-11-25) | 第 13 章 |
+| REF-003 | MCP Specification v2026-07-28 | [modelcontextprotocol.io](https://modelcontextprotocol.io/specification/2026-07-28) | 第 13 章 |
 | REF-004 | Claude Code Documentation | [docs.anthropic.com](https://docs.anthropic.com/en/docs/claude-code) | 第 19 章 |
 | REF-005 | GitHub Copilot Documentation | [docs.github.com](https://docs.github.com/en/copilot) | 第 19 章 |
 | REF-006 | OpenAI Agents SDK | [openai.github.io](https://openai.github.io/openai-agents-python/) | 第 19 章 |
-| REF-007 | LangGraph Documentation | [langchain-ai.github.io/langgraph](https://langchain-ai.github.io/langgraph/) | 第 19 章 |
+| REF-007 | LangGraph Documentation | [langchain-ai.github.io/langgraph](https://docs.langchain.com/oss/python/langgraph/overview) | 第 19 章 |
 | REF-008 | Continue Documentation | [docs.continue.dev](https://docs.continue.dev/) | 第 19 章 |
 | REF-009 | Cursor Documentation | [docs.cursor.com](https://docs.cursor.com/) | 第 19 章 |
-| REF-010 | A2A Protocol Specification | [github.com/a2aproject/A2A](https://github.com/a2aproject/A2A/blob/main/docs/specification.md) | 第 13、15、16、20 章 |
+| REF-010 | A2A Protocol Specification | [github.com/a2aproject/A2A](https://a2a-protocol.org/latest/specification/) | 第 13、15、16、20 章 |
 | REF-012 | Google Agent Development Kit | [google.github.io/adk-docs](https://google.github.io/adk-docs/) | 第 19、20 章 |
 | REF-013 | Pydantic AI Documentation | [ai.pydantic.dev](https://ai.pydantic.dev/) | 第 19、20 章 |
 | REF-011 | OpenTelemetry GenAI Semantic Conventions | [opentelemetry.io](https://opentelemetry.io/docs/specs/semconv/registry/attributes/gen-ai/) | 第 17、18 章 |
+
+## 2026-10-26 专项核查来源
+
+下列资料用于当前未发布修订。文档读取不等于运行验证；提交快照、证据矩阵和适用范围见第 19 章。旧版 MCP 资料继续作为兼容性来源保留在第 13 章。
+
+| 来源 | 本轮核查用途 | 相关章节 |
+|------|--------------|----------|
+| [MCP Versioning](https://modelcontextprotocol.io/docs/2026-07-28/learn/versioning)、[Key Changes](https://modelcontextprotocol.io/specification/2026-07-28/changelog) | 当前版本、无状态请求与旧版兼容 | 13、16 |
+| [Agent Skills Specification](https://agentskills.io/specification) | 可移植目录格式、渐进加载与 Host 语义边界 | 12、19 |
+| [Codex Platform](https://developers.openai.com/blog/codex-as-a-platform) | CLI / SDK / app-server 与应用责任 | 19 |
+| [OpenCode Permissions](https://opencode.ai/docs/permissions/) | 三态策略、匹配顺序和外部目录 | 19 |
+| [OpenHands](https://github.com/OpenHands/OpenHands)、[Software Agent SDK](https://github.com/OpenHands/software-agent-sdk) | UI、调度与执行分层 | 19 |
+| [Deep Agents Overview](https://docs.langchain.com/oss/python/deepagents/overview) | 上下文、Backend 和委派组合 | 4、19 |
+| [LangGraph Persistence](https://docs.langchain.com/oss/python/langgraph/persistence) | Checkpointer 与 Store 的不同职责 | 19 |
+| [Hermes Skills](https://hermes-agent.nousresearch.com/docs/user-guide/features/skills) | 按需加载与个人助理扩展 | 19 |
+| [OpenClaw Security](https://docs.openclaw.ai/gateway/security) | Gateway 信任边界和部署约束 | 19 |
+| [Cursor Skills](https://cursor.com/docs/skills)、[Continue](https://docs.continue.dev/) | 更新旧版能力与配置表述 | 19 |
+| [AndroidWorld](https://github.com/google-research/android_world)、[Android FGS 限制](https://developer.android.com/develop/background-work/services/fgs/restrictions-bg-start) | 设备任务验证与平台约束 | 17、18、19 |
 
 ## 学术论文
 
@@ -42,13 +60,13 @@
 | REF-116 | [Agentless: Demystifying LLM-based Software Engineering Agents](https://arxiv.org/abs/2407.01489) | Xia et al., 2024 | 第 15 章 |
 | REF-117 | [OpenAI o1 System Card](https://openai.com/index/openai-o1-system-card/) | OpenAI, 2024 | 第5章 |
 | REF-118 | [Building Effective Agents](https://www.anthropic.com/research/building-effective-agents) | Schluntz et al., 2024 | 第 7 章 |
-| REF-119 | [Computer Use: Claude Agent on Desktop](https://www.anthropic.com/news/claude-computer-use) | Anthropic, 2024 | 第6章 |
+| REF-119 | [Introducing computer use, a new Claude 3.5 Sonnet, and Claude 3.5 Haiku](https://www.anthropic.com/news/3-5-models-and-computer-use) | Anthropic, 2024 | 第6章 |
 
 ## RFC / 规范
 
 | 编号 | 规范 | 来源 | 相关章节 |
 |------|------|------|---------|
-| REF-201 | MCP Specification v2025-11-25 | [modelcontextprotocol.io](https://modelcontextprotocol.io/specification/2025-11-25) | 第 13 章 |
+| REF-201 | MCP Specification v2026-07-28 | [modelcontextprotocol.io](https://modelcontextprotocol.io/specification/2026-07-28) | 第 13 章 |
 | REF-202 | JSON Schema Specification | [json-schema.org](https://json-schema.org/) | 第6章 |
 | REF-203 | OpenAPI Specification | [swagger.io/specification](https://swagger.io/specification/) | 第6章, 第 14 章 |
 
@@ -59,7 +77,7 @@
 | REF-301 | Awesome MCP Servers | [github.com/punkpeye/awesome-mcp-servers](https://github.com/punkpeye/awesome-mcp-servers) | 第 13 章 |
 | REF-302 | Awesome LLM Agents | [github.com/hyp1231/awesome-llm-powered-agent](https://github.com/hyp1231/awesome-llm-powered-agent) | 全书 |
 | REF-303 | Anthropic Courses - Tool Use | [github.com/anthropics/courses](https://github.com/anthropics/courses) | 第6章 |
-| REF-304 | OpenHands | [github.com/All-Hands-AI/OpenHands](https://github.com/All-Hands-AI/OpenHands) | 第 16、19、20 章 |
+| REF-304 | OpenHands | [github.com/All-Hands-AI/OpenHands](https://github.com/OpenHands/OpenHands) | 第 16、19、20 章 |
 | REF-305 | SWE-agent | [github.com/SWE-agent/SWE-agent](https://github.com/SWE-agent/SWE-agent) | 第 16、19 章 |
 | REF-306 | Aider | [aider.chat](https://aider.chat/) | 第 16、19 章 |
 | REF-307 | Cline | [github.com/cline/cline](https://github.com/cline/cline) | 第 16、19 章 |

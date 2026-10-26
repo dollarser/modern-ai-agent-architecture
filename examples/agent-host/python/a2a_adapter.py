@@ -36,7 +36,9 @@ class HostA2AAdapter:
         bound = self._run_tasks.get(request.run_id)
         if bound and bound != request.task_id:
             return {"success": False, "error_code": "checkpoint_mismatch",
-                    "error_message": "一个 run_id 不能绑定多个远程 task", "retryable": False}
+                    "error_message": "一个 run_id 不能绑定多个远程 task", "retryable": False,
+                    "details": {"run_id": request.run_id, "bound_task_id": bound,
+                                "requested_task_id": request.task_id}}
         self._run_tasks[request.run_id] = request.task_id
         result = await self.client.submit(request)
         await self.host.events.publish("a2a.task.submitted", {
@@ -49,7 +51,9 @@ class HostA2AAdapter:
         bound = self._run_tasks.get(run_id)
         if bound != task_id:
             return {"success": False, "error_code": "checkpoint_mismatch",
-                    "error_message": "run_id 与远程 task_id 不匹配", "retryable": False}
+                    "error_message": "run_id 与远程 task_id 不匹配", "retryable": False,
+                    "details": {"run_id": run_id, "bound_task_id": bound,
+                                "requested_task_id": task_id}}
         return await self.client.get_task(task_id, tenant_id, owner)
 
     async def get_artifact(self, run_id: str, artifact_id: str, tenant_id: str, owner: str) -> bytes:

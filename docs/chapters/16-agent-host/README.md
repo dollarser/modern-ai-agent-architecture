@@ -224,7 +224,11 @@ class CheckpointStore(Protocol):
 
 默认 `JsonCheckpointStore` 通过临时文件替换提供单进程原子写入。生产系统可以注入 SQL、工作流状态存储或其他持久化 Adapter；它们仍需自行处理并发版本、租户隔离、Schema 迁移和保留策略。
 
-Checkpoint 同时保存 `CapabilitySnapshot`：Tool 名称/Schema/来源、Skill 内容校验和、Policy 版本和关键配置共同生成 `snapshot_hash`。恢复前必须比较当前能力快照；不兼容时返回 `failed/capability_snapshot_mismatch`，而不是让旧计划调用已经改变语义的 Tool。审批 ID 也绑定该 Hash，旧能力上的审批不能自动授权新版本能力。
+任何持久化 Adapter 都应在顶层记录单调 `format_version`，并把它与业务 `revision` 分开：前者描述磁盘/数据库格式，后者描述同一 Run 的状态演进。加载未知的新版本必须 fail-loud；面对旧版本，应显式选择“经过测试的迁移”或“拒绝并提示升级”，不能静默猜测字段默认值。迁移前后还要重新计算 Capability Snapshot，并确保审批绑定没有因格式转换而扩大权限。
+
+Checkpoint 同时保存 `CapabilitySnapshot`：Tool 名称/Schema/来源、Skill 内容校验和、Policy 版本和关键配置共同生成 `snapshot_hash`。恢复前必须比较当前能力快照；不兼容时公开返回 `failed/checkpoint_mismatch`，并在 `details.reason` 保留 `capability_snapshot_mismatch`，而不是让旧计划调用已经改变语义的 Tool。审批 ID 也绑定该 Hash，旧能力上的审批不能自动授权新版本能力。
+
+Agent Host 的公开 `run()` 结果遵守全书五字段错误契约：失败时返回 `success=false`、规范化 `error_code`、`error_message`、`retryable` 和 `details`。内部状态仍暂时保留 `error` 兼容字段；`run_task_mismatch`、`capability_snapshot_mismatch` 等内部原因在公开边界映射为 `checkpoint_mismatch`，原始原因写入 `details.reason`。
 
 ### 3.3 生命周期 Hook Pipeline 教学实现
 
@@ -234,10 +238,25 @@ Checkpoint 同时保存 `CapabilitySnapshot`：Tool 名称/Schema/来源、Skill
 新任务：before_run → before_plan → after_plan
 恢复：  before_run → on_resume
 执行：  before_tool
-          → before_approval → after_approval
-          → after_tool / on_tool_error
+          → 可选审批：before_approval → after_approval
+          → 审批拒绝：on_approval_rejected
+          → 调用管线失败：on_tool_error → after_tool
+          → Handler 完成：after_tool
 结束：  after_run → on_finish
 ```
+
+当前教学实现将 Tool 解析、Policy、审批准备和 Handler 执行阶段的异常统一记为 `on_tool_error`，并以 `after_tool` 表示本次调用尝试已结束。明确的审批拒绝属于治理决定：Handler 尚未执行，因此单独发送 `on_approval_rejected`，也不触发 `after_tool`。生产系统若需要分别统计策略阻断、管线故障与 Handler 错误，应进一步拆分 `on_tool_blocked`、`on_tool_pipeline_error` 等事件，而不是从错误文本猜测类别。
+
+各章事件名描述的是不同抽象层，映射如下；事件名不决定 Hook 的 Guard/Observer 失败模式：
+
+| 语义阶段 | 第 9 章 Runtime 摘录 | 第 10 章通用 Hook | 本章 Agent Host |
+|----------|---------------------|------------------|-----------------|
+| Tool 调用前 | `before_execute` | `before_tool_call` | `before_tool` |
+| Tool 调用后 | `after_execute` | `after_tool_call` | `after_tool` |
+| Tool 调用失败 | Runtime 错误路径 | 按注册模式处理 | `on_tool_error` |
+| 审批拒绝 | 未单列 | 可注册治理 Guard | `on_approval_rejected` |
+
+跨组件 Trace 或 Adapter 必须先映射到本表的语义阶段，不能把三套局部事件名当成同一个公共协议。
 
 Hook 分成两类：
 
@@ -365,12 +384,12 @@ sequenceDiagram
         X-->>R: result
         R->>H: after_tool
     else rejected
-        R->>H: on_tool_error + after_tool
+        R->>H: on_approval_rejected
         Note over R,X: Handler 从未执行
     end
 ```
 
-> **图 16-4：** 审批执行顺序。请求包含依赖结果解析出的执行预览、风险和幂等键；审批结果在 Handler 之前写入 Checkpoint，恢复时复用已有决定。
+> **图 16-4：** 审批执行顺序。请求包含依赖结果解析出的执行预览、风险和幂等键；审批结果在 Handler 之前写入 Checkpoint，恢复时复用已有决定。审批拒绝是治理决定，不计入 Tool Handler 错误率，也不触发 `after_tool`。
 
 审批不是对空 Tool 参数做“盲批”。Tool 先通过 `prepare` 生成解析后的执行意图，再形成结构化请求：
 
@@ -412,7 +431,7 @@ Plugin-contributed Tool 生成变更建议
 → compose_report
 ```
 
-Event Bus 同时记录 `task.started` 和 `task.completed`。发布和 Subscriber 均支持异步实现；Subscriber 也区分 Guard 与 Observer：Guard 失败关闭流程，Observer 失败隔离为 `observer.error` 事件。内存 Bus 只证明发布/订阅边界，不提供持久化、重放或 Exactly-once 语义。
+Event Bus 同时记录 `task.started` 和 `task.completed`。发布和 Subscriber 均支持异步实现；当前教学 Bus 还允许 Guard Subscriber 把错误返回发布者，Observer 失败则隔离为 `observer.error` 事件。这里的异步是可等待回调，不是持久消息队列。Guard 只能阻止发布者后续步骤，不能撤销发布前已完成的操作；生产授权仍应在 Handler 前的明确执行链完成，不能依赖事后通知。内存 Bus 不提供持久化、重放或 Exactly-once 语义。
 
 ---
 
@@ -440,7 +459,11 @@ Task
 源码位于：
 
 - [Agent Host 示例说明](https://github.com/dollarser/modern-ai-agent-architecture/tree/main/examples/agent-host)
+- [Python 状态与 Memory](https://github.com/dollarser/modern-ai-agent-architecture/blob/main/examples/agent-host/python/runtime_state.py)
+- [Python Event Bus 与 Handoff](https://github.com/dollarser/modern-ai-agent-architecture/blob/main/examples/agent-host/python/coordination.py)
 - [Python 组装实现](https://github.com/dollarser/modern-ai-agent-architecture/blob/main/examples/agent-host/python/assembly.py)
+- [TypeScript 状态与 Memory](https://github.com/dollarser/modern-ai-agent-architecture/blob/main/examples/agent-host/typescript/runtime-state.ts)
+- [TypeScript Event Bus 与 Handoff](https://github.com/dollarser/modern-ai-agent-architecture/blob/main/examples/agent-host/typescript/coordination.ts)
 - [TypeScript 组装实现](https://github.com/dollarser/modern-ai-agent-architecture/blob/main/examples/agent-host/typescript/assembly.ts)
 
 ### 7.1 运行方式
@@ -472,7 +495,7 @@ npm start
 | 安装型 Plugin | Provider 经可信 Factory 构造，启动加载、关闭逆序卸载 |
 | 安装面真实接入 | Skill Catalog、MCP Manager 与 Plugin Catalog 经三个 Adapter 进入 Host |
 | Tool 状态受 Router 控制 | Disabled Tool 不向 Planner 暴露，也不能执行 |
-| Tool 参数在 Handler 前校验 | 必填字段、基础类型、枚举和未知字段错误被拒绝 |
+| Tool 参数在 Handler 前校验 | 递归校验声明支持的类型、字段、枚举、数值和长度约束；未知 Schema 关键字拒绝执行 |
 | Plugin 可以卸载 | Plugin 贡献的 Tool、Skill 和 Hook 按 Owner 移除 |
 | Plugin 加载保持原子 | 权限或资源冲突在提交前失败，异常回滚不残留部分资源 |
 | 审批位于副作用之前 | 拒绝时 Handler 调用次数为零 |
@@ -483,12 +506,15 @@ npm start
 | MCP 同名不覆盖 | 多 Server 冲突时生成带 Server Namespace 的别名 |
 | Checkpoint 真正恢复 | Plan、结果、审批、计数与 Trace 从新实例恢复 |
 | 失败不误报成功 | 只有 `status=completed` 返回 `success=true` |
-| Run 不跨任务复用 | 同一 `run_id` 换任务返回 `failed/run_task_mismatch` |
+| Run 不跨任务复用 | 同一 `run_id` 换任务返回 `failed/checkpoint_mismatch`，`details.reason=run_task_mismatch` |
 | 顶层异常诚实收敛 | 规划、Memory、Hook、最终答案或 Checkpoint 异常触发 `on_error` 并返回 `failed` |
 | Python / TypeScript 契约一致 | 两套测试覆盖相同端到端场景 |
 | 受限编码任务闭环 | 工作区列举、读取、搜索、精确 Patch、预注册测试和结果汇报真实运行 |
 | 编码副作用默认拒绝 | Patch 与测试均需审批；拒绝 Patch 后文件字节不变 |
-| 工作区路径受限 | `../` 越界和指向工作区外的既有符号链接被拒绝 |
+| 工作区路径受限 | `../` 越界和外部符号链接被拒绝；随机临时文件阻止预建 `<target>.tmp` 链接覆盖外部文件 |
+| 别名不扩大权限 | canonical name 授权；只有短名 allow 不授予原工具权限 |
+| 并行结果按步提交 | 兄弟步骤取消后保留已完成结果，异步 Checkpoint 提交串行化 |
+| 未知副作用不重放 | 派发标记或超时未知结果进入 `reconciliation_required`，需先核对状态 |
 | 多轮身份不混用 | 一个 Session 保存多轮 Message；每条用户消息创建新的 Task/Run |
 | 历史进入新 Run | Application 裁剪历史后显式传给 Planner Context，不复用旧 Run |
 
@@ -507,7 +533,7 @@ Task
 → report_change
 ```
 
-这里没有提供“执行任意 Shell”或“写入任意绝对路径”的 Tool。`run_check` 只接受内部标识 `unit`，Adapter 再映射为 Python `-m unittest -q` 或 Node `--test`；用户输入不会拼接进命令行。`Workspace` 先解析固定根目录，所有文件参数必须留在根目录下，工作区外符号链接不会被遍历或读取。`apply_patch` 仅在旧文本恰好出现一次时写入临时文件并原子替换，避免模糊匹配悄悄改错位置。
+这里没有提供“执行任意 Shell”或“写入任意绝对路径”的 Tool。`run_check` 只接受内部标识 `unit`，Adapter 再映射为 Python `-m unittest -q` 或 Node `--test`；用户输入不会拼接进命令行。`Workspace` 先解析固定根目录，所有文件参数必须留在根目录下，工作区外符号链接不会被遍历或读取。`apply_patch` 仅在旧文本恰好出现一次时独占创建随机临时文件、保留原权限并原子替换；Checkpoint 与 Session Store 也使用安全临时写入。可预测的 `<target>.tmp` 即使位于工作区内，也可能被预先放置为外部符号链接，不能直接跟随写入。
 
 这是**可运行的安全教学切片**，不是生产沙箱：它没有容器、文件系统配额、进程树回收、完整 Unified Diff、Git 事务或跨平台命令策略。生产实现应保留相同 Tool 契约，但把 Workspace 和 Process Adapter 替换为 OS/容器级隔离实现。
 
@@ -521,15 +547,19 @@ stateDiagram-v2
     New --> Running: 创建 Plan + 首次 Checkpoint
     Running --> Interrupted: 教学中断 / 可恢复暂停
     Interrupted --> Running: 同一 Task / resumed=true
-    Running --> Completed: 所有步骤成功
+    Running --> ReconciliationRequired: 超时 / 发现未收尾派发
+    ReconciliationRequired --> [*]: unknown_side_effect / 禁止自动重放
+    Running --> Finalizing: 所有 Tool 成功
+    Finalizing --> Completed: 答案已保存
+    Finalizing --> Failed: 答案生成失败
     Running --> Failed: Guard / Tool / Runtime 错误
-    Completed --> Replayed: 同一 Task 再次读取
+    Completed --> Replayed: 读取已保存答案，不调用模型
     Replayed --> [*]: replayed=true / resumed=false
     Interrupted --> TaskMismatch: 换用不同 Task
     Completed --> TaskMismatch: 换用不同 Task
-    TaskMismatch --> [*]: failed / run_task_mismatch
+    TaskMismatch --> [*]: failed / checkpoint_mismatch
     Interrupted --> CapabilityMismatch: Tool / Skill / Policy 已变化
-    CapabilityMismatch --> [*]: failed / capability_snapshot_mismatch
+    CapabilityMismatch --> [*]: failed / checkpoint_mismatch
     Failed --> [*]: 结构化失败
 ```
 
@@ -538,6 +568,12 @@ stateDiagram-v2
 本章的 `AgentHost` 刻意保持为 **Run-scoped Host**：`run_id` 是 Checkpoint、审批和执行结果的键。其上层另提供 `ConversationApplication + JsonSessionStore`，负责 Session、Message、Task 与 Run 的映射；这证明对话能力可以组合在 Host 之外，而不必把 `run_id` 错改成 Session。Host 仍用不可变 `task` 文本校验同一 Run 的恢复输入。
 
 > **取舍依据：** [A2A Life of a Task](https://a2aproject.github.io/A2A/latest/topics/life-of-a-task/) 明确说明一个 `contextId` 可组合多个 Task。本例只实现教学型 Session Store，不实现完整对话产品；但它已经显式保存 Session → Message → Task/Run 映射，避免用 `session_id` 掩盖一对一执行键。
+
+恢复前还要核对副作用状态。每次 Handler 派发前保存 `executions` 标记，每步完成后立即保存结果并清除标记；异步存储写入按顺序提交。兄弟步骤取消不会抹掉已完成步骤。恢复遇到未收尾标记或 `outcome_unknown=true` 的结果时返回 `reconciliation_required`，规范化错误为 `unknown_side_effect`，不再调用 Handler。Python `CancelledError` 与 TypeScript `AbortError` 仍向调用方传播；下一次恢复通过标记发现未核实的执行。
+
+能力快照还绑定工具实现版本、Handler / prepare 代码摘要、审批标记、Tool 状态和默认策略规则。没有快照的旧 Checkpoint 不再自动恢复。审批键包含 canonical name、实际参数和重新计算的资源预览，资源目标变化后旧决定失效。代码摘要无法覆盖闭包配置、默认值、外部库或远端实现；维护者必须更新 `implementation_version` / `implementationVersion`，自定义策略规则变化必须更新 `version`。这些摘要不是跨语言或跨运行时迁移格式。
+
+参数校验支持递归对象与数组、单类型、必填字段、布尔 `additionalProperties`、枚举、数值上下界、字符串及数组长度。未支持的 Schema 关键字一律拒绝，不把部分校验冒充完整 JSON Schema。生产接入完整协议 Schema 时应换用标准校验器。
 
 ### 7.5 Application Session：多轮对话如何进入新 Run
 
@@ -553,7 +589,9 @@ Session(session_id)
 TaskRecord(task_id, run_id, request, status)
 ```
 
-`ConversationApplication.send()` 先加载 Session，截取最近若干条历史，再为当前用户消息创建全新的 `task_id/run_id`。用户意图和执行身份必须在 Runtime 调用前落盘；Run 完成后，Application 再写入 Assistant Message 和 Task 终态。历史以显式 `conversation_context` 传给 AgentHost 的 Planner，它不会改变 Run 的恢复身份，也不会把整个 Session 无上限复制进 Context。
+`ConversationApplication.send()` 先加载 Session。提供客户端消息幂等键时，先检查原消息：同键同内容读取已保存结果，同键不同内容拒绝；原消息尚无结果时要求显式恢复。只有新消息才截取历史并创建新的 `task_id/run_id`。用户意图和执行身份必须在 Runtime 调用前落盘；Run 完成后，Application 再写入 Assistant Message 和 Task 终态。裁剪后的历史随 Task 持久化，并以显式 `conversation_context` 传给 Planner，恢复不重新混入后续消息；历史上限为 0 时不传历史。同一 Session 串行，不同 Session 可并发。取消或异常回写任务状态，`resume(session_id, task_id)` 复用原 Run；旧幂等键不会悄悄创建第二个任务。
+
+Run 内的 Tool 执行完成与最终交付分开：`finalizing` 先落盘，生成最终答案后保存答案与 `completed`，再执行 Memory、Hook 与 Event 交付。答案生成失败后恢复只补生成答案；已保存答案的完成回放不调用模型。同进程、同一 JSON 存储路径与 Run 使用共享互斥，防止两个 Host 同时执行；自定义 Store 的独立实例与多进程部署仍需原子认领或租约。
 
 教学 `JsonSessionStore` 使用原子替换并在进程内串行化发送，但它不提供多进程事务、租户隔离或分布式锁。生产实现应为 `session_id + message_id`、`task_id` 和 `run_id` 分别设置唯一约束和幂等键，并定义并发消息的排序策略。
 
@@ -586,7 +624,7 @@ class ArtifactRef:
 
 Artifact 的读取也必须经过租户、主体、Run 和保留期检查。不要把可下载的永久 URL 直接写入 Prompt、Trace 或最终回答；生产实现应使用短期授权引用，并记录谁在何时读取了 Artifact。
 
-> **来源类型：** Fact + 推导分析 —— A2A 将 Task、Status Update 与 Artifact 分离；MCP v2025-11-25 也提供了面向延迟结果的实验性 Tasks。这里的状态、幂等和访问控制是不依赖具体协议的 Host 契约。
+> **来源类型：** Fact + 推导分析 —— A2A 将 Task、Status Update 与 Artifact 分离；MCP 的 Tasks 从 `2025-11-25` 实验能力迁移到 `2026-07-28` 的官方扩展，见第 13 章版本表。这里的状态、幂等和访问控制是不依赖具体协议的 Host 契约。
 
 对应的最小双语言契约测试位于 [A2A Task / Artifact 示例](https://github.com/dollarser/modern-ai-agent-architecture/tree/main/examples/a2a-task-artifact)。示例只实现协议模型和内存 Artifact Store，刻意不把内存实现描述成生产级持久化或远程传输。
 
@@ -661,9 +699,9 @@ flowchart TB
 | 并行 | 只并行依赖已满足的步骤 | 限流、背压、资源池、取消传播 |
 | Run 能力视图 | 规划前冻结 Tool Registry | 跨进程租约、版本化连接池、优雅热卸载 |
 | 重试 | 只重试 `retryable=true` | 幂等键、错误分类、Retry-After、抖动退避 |
-| 超时 | Runtime 停止等待 | Provider 取消协议和资源隔离 |
+| 超时 | 停止等待，标记结果未知并阻止自动重放 | Provider 取消确认、回执核对和资源隔离 |
 | Checkpoint | JSON 原子替换 | 事务、并发控制、Schema 迁移、保留策略 |
-| Session Store | JSON 原子替换、进程内串行发送 | 消息幂等、并发排序、租户隔离、事务和保留策略 |
+| Session Store | JSON 原子替换、按 Session 串行、消息幂等与显式恢复 | 消息幂等、并发排序、租户隔离、事务和保留策略 |
 | 能力快照 | Tool/Skill/Policy/配置摘要与恢复拒绝 | 兼容迁移、签名身份和版本注册中心 |
 | Memory | 内存词项检索 | 持久化、Embedding、权限和遗忘策略 |
 | MCP | Fake Client | 真实 Transport、认证、能力协商和断线恢复 |
@@ -673,6 +711,43 @@ flowchart TB
 | LLM | 确定性离线 Adapter | Provider 认证、限流、取消、用量和输出校验 |
 
 不能因为 Runtime 超时就假设外部副作用已经取消，也不能因为 Checkpoint 保存成功就假设 Tool 事务一定提交。副作用 Tool 必须提供幂等键，并记录可核对的执行标识。
+
+### 8.1 崩溃窗口：先核对副作用，再决定恢复
+
+假设 Agent 已向外部系统提交一张工单，但在保存 Tool Result 前进程退出。恢复后只有“准备提交”的 Checkpoint，重跑 Handler 就可能创建第二张工单。Approval、外部提交、本地回执、Assistant Message 和预算结算不是同一个事务。
+
+生产实现可为每次调用保存 `call_id`、`run_id`、输入摘要、能力修订、审批绑定、业务幂等键、下游请求 ID 与执行状态。以下状态是本书的设计建议，不是 MCP / A2A 标准枚举：
+
+| 故障点 | 恢复时可用证据 | 处理方式 |
+|--------|----------------|----------|
+| 调用前退出 | 已持久化意图，尚未交给执行器 | 重新验证能力、权限和目标，再调度 |
+| 调用中断、是否提交未知 | 已派发，但没有可信提交结果 | 标记 `effect_unknown`，阻止盲目重试 |
+| 下游已提交、本地未保存 | 下游请求 ID 或可查询的业务幂等键 | 先只读查询；确认成功后补本地回执 |
+| 回执已保存、UI 未发布 | 持久化成功回执及产物引用 | 修复 Message / UI 投影，不再次执行 Tool |
+| 取消已请求、底层仍运行 | 执行器尚未确认退出 | 保留物理执行占用，不能提前启动冲突写入 |
+
+“尚未交给执行器”必须来自可信派发记录，不能由“没有结果”推断；派发与记录之间存在歧义时仍按未知处理。下游没有幂等或查询接口时，Host 无法单方面保证 exactly-once。可提供人工核对、补偿操作或显式创建新尝试；新的 JSON-RPC 请求 ID、Run ID 与业务幂等键不能互换。
+
+多 Worker 场景还需用租约及单调 fencing token 阻止旧执行器继续提交本地状态，消费方应验证 token；对于不接受 token 的外部系统，这不能阻止旧请求已产生的副作用。恢复时重建的是可核验的执行事实，而不是把所有历史 Tool 再调用一遍。
+
+本节为生产设计推导。现有 JSON Checkpoint 示例保存本地派发标记并拒绝重放未知结果。Host 的 `reconcile` 允许可信 Adapter 核对后补录确定结果和证据引用，且本地调用尚未结束时拒绝对账；它不执行下游查询，也不把核对失败的步骤重置为可重试。应用随后显式恢复原 Run。模型不能直接调用该入口，证据字符串本身也不等于已完成鉴权或回执验真。
+
+示例已测试并行取消、超时、消息幂等、稳定回放与本地回执补录；它不实现真实下游执行回执查询、Outbox、跨进程租约或跨系统故障注入，其恢复测试不能证明跨系统事务成立。对应验收场景见[第 18 章](../18-best-practices/README.md)。
+
+### 8.2 真实 Provider / MCP 接入的最小验收切片
+
+先保留离线确定性测试，再在隔离的测试工作区增加一条可追踪的真实链路：只读用户输入 → Provider 结构化 Tool Call → 统一 Registry → 真实 MCP Adapter → Observation → 可核验回答。不要直接从匿名模型输出进入远端 Handler。
+
+| 阶段 | 验收证据 |
+|------|----------|
+| 固定环境 | SDK / Server 版本、模型 ID、协议分支、配置摘要；Secret 只记引用 |
+| 发现 | Server 身份、实际支持版本、Tool Schema、能力 Hash |
+| 正常调用 | 模型请求、Tool Call、协议请求 ID 与结果能关联到同一 Trace |
+| 受控失败 | 错误 Schema 被拒绝；认证失效不会换身份重试；断流不会静默重复写入 |
+| 取消与结算 | 停止等待、底层退出、用量补报和资源释放分别有证据 |
+| 审批变更 | 审批后修改目标或能力修订，旧审批不能继续授权 |
+
+只读切片通过后，再使用可清理的测试资源验证写入与恢复。报告应区分“文档支持”“离线契约通过”“真实传输通过”和“目标设备端到端通过”；本书当前没有提供最后两类验收结果。
 
 ---
 
@@ -731,7 +806,7 @@ flowchart TB
 - [ ] 能说明 `prepare → approve → execute`，并保证默认拒绝和拒绝后 Handler 不执行
 - [ ] 能完成一次带父子 Trace 的 Handoff
 - [ ] 能直接注入异步 Memory、Checkpoint、Event Bus、Hook、Tool、MCP、Approval 与 Subagent
-- [ ] 能区分 `resumed`、`replayed`、`run_task_mismatch` 与普通失败
+- [ ] 能通过 `checkpoint_mismatch` 的 `details.reason` 区分 `run_task_mismatch`、`capability_snapshot_mismatch` 与普通失败
 - [ ] 能从 Checkpoint 恢复且不重复审批，并将历史回灌到 MemoryBackend
 - [ ] 能说明教学实现与生产基础设施之间的边界
 - [ ] 能运行受限 Coding Agent，并解释 Workspace、Approval、精确 Patch 和预注册检查的安全边界

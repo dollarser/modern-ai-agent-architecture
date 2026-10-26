@@ -7,7 +7,7 @@ const assert = (condition: boolean, message: string): void => {
 const guarded = new AgentWithHooks();
 guarded.registerCustomHook("before_tool_call", (toolName: unknown) => {
   if (String(toolName) !== "read_file") throw new Error("denied");
-});
+}, "guard");
 assert(guarded.run("危险任务", "delete_all") === null, "guard must block");
 
 const masking = new AgentWithHooks();

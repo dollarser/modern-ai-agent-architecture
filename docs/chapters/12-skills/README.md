@@ -87,6 +87,14 @@ Skill = 工作流模板 + 领域知识 + 约束条件 + 输出规范
 
 ---
 
+### 1.5 Agent Skills 格式与 Host 执行契约
+
+截至 2026-10-26，[Agent Skills 规范](https://agentskills.io/specification)定义以 `SKILL.md` 为入口的目录格式，包含 YAML 元数据和 Markdown 指令；`scripts/`、`references/`、`assets/` 是可选资源约定。它定义可移植的内容形态，不定义本书的安装目录、触发器、版本注册中心或审批状态机。
+
+渐进加载分为目录元数据、激活后的正文和按需资源。加载脚本文件不等于执行脚本；运行仍由 Host 的 Tool、Policy 和 Sandbox 控制。规范中的 `allowed-tools` 仍是实验字段，各 Host 的支持可能不同，不能把从外部导入的声明当作本地授权。
+
+移植 Skill 时应检查：名称冲突和优先级、资源相对路径、脚本依赖、可用 Tool 名称、权限语义以及本地 / 远程部署范围。文件可被解析只说明格式兼容，不证明其运行效果和授权兼容。第 19 章分别记录 Cursor 与 Hermes 的公开加载行为，不能把其中一种策略写成所有 Host 的必选机制。
+
 ## 2. 核心概念
 
 ### 2.1 Skill 的组成结构
@@ -122,6 +130,15 @@ flowchart TD
 
 > **图 12-2：** Skill 在 Agent 主循环中的位置。Agent 先根据任务匹配 Skill，将命中的工作流指令加载到 Context，再进行 Reasoning 和 Planning，使 Skill 能参与计划生成；任务条件变化或重新规划时可以再次匹配。第 16 章 Agent Host 采用这一时序。
 
+“匹配”至少有两种合法实现，不能把某一种产品行为写成行业标准：
+
+| 路由方式 | 机制 | 优点 | 风险与控制 |
+|---------|------|------|-----------|
+| Host 路由 | 宿主按任务类型、结构化元数据或版本化规则选择 Skill | 确定、易审计，适合受控工作流 | 关键词规则容易误触发；规则版本和命中依据应进入 Trace |
+| 模型触发 | 模型先看到名称/描述目录，再通过受控 loader 按需读取 `SKILL.md` 与引用资源 | 组合灵活，天然支持渐进式披露 | 选择具有不确定性；loader 仍须校验路径、权限、来源和预算 |
+
+两种方式都必须先暴露最小元数据，再按需加载正文；也可以由 Host 先过滤候选集、模型再选择。正文后面的 `SkillRegistry.match()` 是 Host 路由教学实现，不代表 Claude Code、Codex 或其他产品的统一内部机制。
+
 ### 2.3 Skill 的生命周期
 
 扩展统一采用：
@@ -145,7 +162,7 @@ Skill 的价值不在于把所有领域手册一次性塞入 Context，而在于
 | 主指令 | 工作流、约束、输出契约 | 任务匹配后 |
 | 补充资料 | API 细节、长示例、检查表、脚本 | 当前步骤明确需要时 |
 
-渐进式披露不能替代权限控制：即使参考资料未加载，对应 Tool 仍必须由 Runtime 和 Guardrails 执行权限检查。
+渐进式披露不能替代权限控制：即使参考资料未加载，对应 Tool 仍必须由 Runtime 和 Guardrails 执行权限检查。补充资料必须携带可加载的相对路径或受控 URI；loader 应将其解析到 Skill 根目录或允许的资源 Provider，拒绝路径逃逸和任意网络地址。
 
 > **来源类型：** 推导分析 —— 基于 Context 预算、Skill 匹配和按需加载的工程取舍
 
@@ -447,7 +464,10 @@ class SkillRegistry:
 
     def register(self, skill: Skill):
         """注册 Skill"""
-        self._skills[skill.metadata.name] = skill
+        name = skill.metadata.name
+        if name in self._skills:
+            raise ValueError(f"Skill '{name}' 已注册；请显式 update 或 unregister")
+        self._skills[name] = skill
 
     def unregister(self, name: str):
         """注销 Skill"""
@@ -580,7 +600,7 @@ if __name__ == "__main__":
   加载 code-review Skill:
   # Skill: code-review
   ...
-  (共 47 行)
+  (共 49 行)
 ============================================================
 ```
 
@@ -590,7 +610,7 @@ if __name__ == "__main__":
 
 ```text
 my-skill/
-├── skill.json       # name/version/keywords/dependencies/permissions
+├── skill.json       # name/version/description（必填）+ keywords/dependencies/permissions
 ├── SKILL.md         # 匹配后加载的主指令
 └── references/      # 可选，按需读取的补充资料
 ```
@@ -720,7 +740,7 @@ Instructions 是较稳定的行为准则（「始终使用中文」），可按�
 |------|------|------|------|
 | REF-1 | [Claude Code Skills](https://docs.anthropic.com/en/docs/claude-code/skills) | 官方文档 | Skills 系统的官方实现 |
 | REF-2 | [OpenAI GPTs Actions](https://platform.openai.com/docs/actions) | 官方文档 | GPTs 的 Action 设计（类似 Skill） |
-| REF-3 | [Anthropic Skill Authoring](https://docs.anthropic.com/en/docs/build-with-claude/skill-authoring) | 官方文档 | Skill 编写指南 |
+| REF-3 | [Anthropic Skills Guide](https://platform.claude.com/docs/en/build-with-claude/skills-guide) | 官方文档 | Skill 编写指南 |
 | REF-4 | [Agent Skills Specification](https://agentskills.io/specification) | 开放规范 | `SKILL.md`、脚本与资源目录的通用格式 |
 | REF-5 | [OpenAI Skills Catalog](https://github.com/openai/skills) | 官方开源仓库 | Codex 中 Skill 的发现、安装与分发实例 |
 | REF-6 | [OpenClaw Skills](https://github.com/openclaw/openclaw/blob/main/docs/tools/skills.md) | 开源仓库文档 | Skill 作用域、允许列表、插件分发与第三方 Skill 安全边界 |
@@ -729,7 +749,7 @@ Instructions 是较稳定的行为准则（「始终使用中文」），可按�
 
 ## 10. 延伸阅读
 
-- [Claude Code Skill Examples](https://github.com/anthropics/claude-code/tree/main/skills) —— 官方 Skill 示例
+- [Anthropic Skills](https://github.com/anthropics/skills) —— 官方 Skill 示例仓库
 - [Prompt Chains vs Agents](https://arxiv.org/abs/2310.04438) —— 工作流编排模式对比
 - [Building Effective Agents](https://www.anthropic.com/research/building-effective-agents) —— Anthropic 的 Agent 构建指南
 

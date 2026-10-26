@@ -1,0 +1,17 @@
+{
+  "https://openai.com/blog": {
+    "checked_at": "2026-10-26T16:04:45.293813+00:00",
+    "title": "OpenAI News (redirects to openai.com/news/)",
+    "method": "Opened official page via web retrieval; verified page title and substantive body. CLI requests receive HTTP 403."
+  },
+  "https://openai.com/index/harness-engineering/": {
+    "checked_at": "2026-10-26T16:04:45.293943+00:00",
+    "title": "Harness engineering: leveraging Codex in an agent-first world",
+    "method": "Opened official page via web retrieval; verified page title and substantive body. CLI requests receive HTTP 403."
+  },
+  "https://openai.com/index/openai-o1-system-card/": {
+    "checked_at": "2026-10-26T16:04:45.293945+00:00",
+    "title": "OpenAI o1 System Card",
+    "method": "Opened official page via web retrieval; verified page title and substantive body. CLI requests receive HTTP 403."
+  }
+}

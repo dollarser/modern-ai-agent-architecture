@@ -46,14 +46,7 @@ Context 管理是 Agent 架构中最基础也最容易被忽视的问题。
 
 ### 1.2 Context Window 的演进
 
-| 时间 | 模型 | 上下文窗口 | 影响 |
-|------|------|-----------|------|
-| 2022 | GPT-3.5 | 4K tokens | 仅支持短对话 |
-| 2023 | GPT-4 | 8K-32K tokens | 支持中等长度文档 |
-| 2023 | Claude 2 | 100K tokens | 支持整本书级上下文 |
-| 2024 | Gemini 1.5 Pro | 1M+ tokens | 支持超长上下文 |
-| 2023 | GPT-4 Turbo | 128K tokens | 大规模上下文处理 |
-| 2025 | Claude 4 | 200K tokens | 企业级上下文管理 |
+模型上下文窗口已经从早期产品的数千 Token 扩展到部分模型的数十万乃至更高，但同一产品也可能因模型版本、API 形态、套餐、缓存和工具定义而不同。这里不维护容易过时的型号排行榜；设计时应从 Provider Capability Contract 读取当前限制，并为输出、Tool Schema、Observation 和估算误差分别预留预算。
 
 虽然上下文窗口越来越大，但「更大」并不等于「更好」——上下文越长，模型在长文本中的注意力越分散，推理成本也越高。因此，Context 管理的核心目标是**在有限的空间内保留最有价值的信息**。
 
@@ -180,6 +173,19 @@ Context Engineering
 
 Context 越多不一定越好。应通过任务评估验证某项信息是否提高成功率或减少错误；无法说明用途、来源和失效条件的内容不应长期占据 Context。
 
+### 2.7 压缩、卸载与按需发现的组合边界
+
+完整 Harness 可以同时使用摘要、把大结果卸载到文件、按需加载 Skill，以及隔离子代理上下文。它们解决不同问题；[Deep Agents 官方概览](https://docs.langchain.com/oss/python/deepagents/overview)提供了这些能力的组合案例（核查日期：2026-10-26），不能据此假定任意文件 Backend 都具备持久化和权限隔离。
+
+| 优化 | 必须保留的执行语义 | 应测试的退化 |
+|------|--------------------|--------------|
+| 对话压缩 | 未完成目标、用户约束、审批绑定与来源引用 | 否定条件或先前纠正被摘要丢失 |
+| 大结果卸载 | 产物 ID、校验和、截断标记、可用读取范围 | 文件过期、权限变化、摘要与原文版本不一致 |
+| Tool / Skill 按需发现 | 本次运行可用的能力身份和修订 | 发现了无权调用的能力、更新后复用旧审批 |
+| 子代理上下文隔离 | 最小输入、预算、权限与结构化结果 | 父代理误把子代理文本当作已经验证的事实 |
+
+Context 是模型可见投影，不是执行账本。压缩不能删除唯一的调用回执或把 `unknown_side_effect` 改写成“失败，可重试”；截图也应保留观测时间和目标窗口，过期图像不能继续授权坐标动作。缓存或压缩的收益应按第 18 章同任务回归验证。
+
 ---
 
 ## 3. Context 管理策略详解
@@ -214,12 +220,16 @@ def compress_history(messages: list[dict],
     recent = messages[-keep_recent:]
     old = messages[:-keep_recent]
 
-    # 压缩旧消息为摘要（实际实现中调用 LLM 生成摘要）
+    # 压缩旧消息为内部摘要对象（实际实现中调用 LLM 生成摘要）
     summary = f"[压缩了 {len(old)} 条历史消息]"
-    compressed = [{"role": "system", "content": f"[历史摘要] {summary}"}]
+    compressed = [{"role": "context_summary", "content": summary}]
 
     return compressed + recent
 ```
+
+`context_summary` 是 Host 内部角色，不应原样发送给模型 API。Provider Adapter 必须依据能力契约映射：支持 mid-conversation system message 时遵守其位置约束；不支持时重新组装顶层 system 或采用显式降级。不能未经判断统一伪装成 user 消息，否则会改变指令优先级和来源语义。能力选择及最终映射应进入 Trace/Checkpoint。
+
+> **来源类型：** Official Fact + 推导分析 —— Anthropic 当前为部分模型提供受位置约束的 mid-conversation system message；这不是跨 Provider 保证。核查日期：2026-08-23。参考：[Mid-conversation system messages and tool changes](https://platform.claude.com/docs/en/build-with-claude/mid-conversation-system-messages)。
 
 **优点：** 保留关键上下文，减少 Token 使用
 **缺点：** 摘要可能丢失细节，需要额外的摘要生成步骤
@@ -229,6 +239,13 @@ def compress_history(messages: list[dict],
 为每条消息分配优先级，保留高优先级的消息。
 
 ```python
+def estimate_text_tokens(text: str) -> int:
+    """依赖无关的保守近似；精确预算应使用目标模型 tokenizer。"""
+    non_ascii = sum(ord(char) > 127 for char in text)
+    ascii_chars = len(text) - non_ascii
+    return max(1, non_ascii + (ascii_chars + 3) // 4)
+
+
 def prioritize_messages(messages: list[dict],
                         max_tokens: int) -> list[dict]:
     """按优先级排序，保留最重要的消息"""
@@ -245,8 +262,8 @@ def prioritize_messages(messages: list[dict],
     result = []
     current_tokens = 0
     for priority, orig_idx, msg in scored:
-        # 使用类内部的 _estimate_tokens 方法进行估算
-        msg_tokens = len(msg.get("content", "")) // 4
+        # 与本章 ContextManager 使用同一估算器；生产环境替换为目标 tokenizer。
+        msg_tokens = estimate_text_tokens(msg.get("content", ""))
         if current_tokens + msg_tokens <= max_tokens:
             result.append((orig_idx, msg))
             current_tokens += msg_tokens
@@ -424,12 +441,16 @@ class ContextManager:
                 break
         # 简化：不恢复顺序
 
+    @staticmethod
+    def _estimate_text_tokens(text: str) -> int:
+        """依赖无关的保守近似；精确预算应调用目标模型 tokenizer。"""
+        non_ascii = sum(ord(char) > 127 for char in text)
+        ascii_chars = len(text) - non_ascii
+        return non_ascii + (ascii_chars + 3) // 4
+
     def _estimate_tokens(self) -> int:
-        """估算 Token 数量（粗略估算：4 字符 ≈ 1 Token）"""
-        total = len(self.system_prompt)
-        for msg in self.messages:
-            total += len(msg["content"])
-        return total // 4
+        texts = [self.system_prompt, *(msg["content"] for msg in self.messages)]
+        return sum(self._estimate_text_tokens(text) for text in texts)
 
     def get_messages(self) -> list[dict]:
         """获取完整消息列表（含 System Prompt）"""
@@ -484,18 +505,18 @@ if __name__ == "__main__":
 **预期输出：**
 
 ```
-  消息 0: 1 条消息, 8.0% Token 使用
-  消息 5: 6 条消息, 39.6% Token 使用
-  消息 10: 11 条消息, 71.0% Token 使用
-  消息 15: 12 条消息, 77.6% Token 使用
-  消息 20: 13 条消息, 84.2% Token 使用
-  消息 25: 10 条消息, 65.2% Token 使用
+  消息 0: 1 条消息, 30.0% Token 使用
+  消息 5: 2 条消息, 54.6% Token 使用
+  消息 10: 3 条消息, 79.4% Token 使用
+  消息 15: 2 条消息, 55.0% Token 使用
+  消息 20: 3 条消息, 79.8% Token 使用
+  消息 25: 2 条消息, 55.0% Token 使用
 ============================================================
   Context Manager 演示
 ============================================================
   策略: sliding
-  消息数: 10
-  Token 使用: 65.2%
+  消息数: 2
+  Token 使用: 55.0%
   Token 上限: 500
 ============================================================
 ```
@@ -565,7 +586,7 @@ if __name__ == "__main__":
 
 | 编号 | 来源 | 类型 | 说明 |
 |------|------|------|------|
-| REF-1 | [OpenAI Token Usage](https://platform.openai.com/docs/guides/tokens) | 官方文档 | Token 计数和管理 |
+| REF-1 | [OpenAI Token Usage](https://developers.openai.com/api/docs/guides/token-counting) | 官方文档 | Token 计数和管理 |
 | REF-2 | [Anthropic Context Windows](https://docs.anthropic.com/en/docs/build-with-claude/context-windows) | 官方文档 | 上下文窗口管理 |
 | REF-3 | [Lost in the Middle](https://arxiv.org/abs/2307.03172) (Liu et al., 2023) | 论文 | 长上下文中的注意力分布研究 |
 | REF-4 | [MemGPT](https://arxiv.org/abs/2310.08560) (Packer et al., 2023) | 论文 | 虚拟内存管理在 LLM 中的应用 |

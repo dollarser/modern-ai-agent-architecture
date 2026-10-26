@@ -28,6 +28,7 @@ export type PolicyRequest = {
   resource: string
   runId: string
   source: string
+  invokedAs?: string
   risk: "normal" | "high"
 }
 export interface PolicyEngine {
@@ -43,8 +44,11 @@ export class DefaultPolicyEngine implements PolicyEngine {
     this.allowedTools = new Set([...allowedTools, ...merged.allowed])
     this.deniedTools = merged.denied
   }
+  snapshot(): Record<string, unknown> {
+    return { allow: [...this.allowedTools].sort(), deny: [...this.deniedTools].sort() }
+  }
   evaluate(request: PolicyRequest): PolicyDecision {
-    if (this.deniedTools.has(request.capability) || !this.allowedTools.has(request.capability)) {
+    if (this.deniedTools.has(request.capability) || this.deniedTools.has(request.invokedAs ?? "") || !this.allowedTools.has(request.capability)) {
       return PolicyDecision.Deny
     }
     return request.risk === "high" ? PolicyDecision.Ask : PolicyDecision.Allow
@@ -55,6 +59,7 @@ export type CapabilitySnapshot = {
   tools: Array<Record<string, unknown>>
   skills: Array<Record<string, unknown>>
   policyVersion: string
+  policy?: Record<string, unknown>
   config: Record<string, unknown>
   snapshotHash: string
 }

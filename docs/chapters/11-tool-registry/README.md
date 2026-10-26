@@ -40,7 +40,7 @@
 - **调度：** 控制 Tool 的执行顺序和并发
 - **生命周期：** 管理 Tool 的启用、禁用、更新
 
-**Tool Registry 是 Agent 的「工具箱」。它不执行 Tool，但知道所有 Tool 在哪里、怎么用、什么时候用。**
+**Tool Registry 是 Agent 的“工具目录”。它负责身份、元数据和生命周期；本章为了展示完整调用链提供一个 `execute()` 门面，但生产实现应把参数校验、Policy/Approval、调度和 Handler 生命周期委托给 Router/Executor，而不是塞进纯 Catalog。**
 
 > **来源类型：** 推导分析 —— 基于微服务架构中 Service Registry 的设计模式
 
@@ -146,7 +146,7 @@ class RegisteredTool:
     state: ToolState = ToolState.ACTIVE
     version: str = "1.0.0"
     tags: list[str] = field(default_factory=list)
-    rate_limit: int = 0          # 每秒最大调用次数
+    min_interval_seconds: float = 0.0  # 教学版仅限制相邻成功调用间隔
     last_called: float = 0.0
     call_count: int = 0
     error_count: int = 0
@@ -173,6 +173,8 @@ class ToolRegistry:
                 raise ValueError(
                     f"Tool '{tool.name}' 已由 {existing.source.value} 注册"
                 )
+            # 同源更新前先摘除旧索引，避免旧 tag/source 残留。
+            self.unregister(tool.name)
 
         self._tools[tool.name] = tool
         self._by_source[tool.source].add(tool.name)
@@ -257,11 +259,11 @@ class ToolRegistry:
         if tool.state != ToolState.ACTIVE:
             return {"success": False, "error": f"Tool '{name}' 状态: {tool.state.value}"}
 
-        # 速率限制检查
-        if tool.rate_limit > 0:
+        # 教学版只实现最小调用间隔，不宣称 QPS、突发桶或配额限流。
+        if tool.min_interval_seconds > 0:
             elapsed = time.time() - tool.last_called
-            if elapsed < 1.0 / tool.rate_limit:
-                return {"success": False, "error": "速率限制"}
+            if elapsed < tool.min_interval_seconds:
+                return {"success": False, "error": "尚未达到最小调用间隔"}
 
         start = time.time()
         try:

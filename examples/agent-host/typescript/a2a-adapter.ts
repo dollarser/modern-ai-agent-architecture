@@ -19,7 +19,8 @@ export class HostA2AAdapter {
     const bound = this.runTasks.get(request.runId)
     if (bound && bound !== request.taskId) {
       return { success: false, error_code: "checkpoint_mismatch",
-        error_message: "一个 run_id 不能绑定多个远程 task", retryable: false }
+        error_message: "一个 run_id 不能绑定多个远程 task", retryable: false,
+        details: { runId: request.runId, boundTaskId: bound, requestedTaskId: request.taskId } }
     }
     this.runTasks.set(request.runId, request.taskId)
     const result = await this.client.submit(request)
@@ -33,7 +34,8 @@ export class HostA2AAdapter {
   async getTask(runId: string, taskId: string, tenantId: string, owner: string): Promise<Record<string, unknown>> {
     if (this.runTasks.get(runId) !== taskId) {
       return { success: false, error_code: "checkpoint_mismatch",
-        error_message: "run_id 与远程 task_id 不匹配", retryable: false }
+        error_message: "run_id 与远程 task_id 不匹配", retryable: false,
+        details: { runId, boundTaskId: this.runTasks.get(runId), requestedTaskId: taskId } }
     }
     return this.client.getTask(taskId, tenantId, owner)
   }

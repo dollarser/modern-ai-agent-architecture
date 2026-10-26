@@ -29,7 +29,11 @@ export type ArtifactView = { artifactId: string; summary: string; mediaType: str
 export function renderArtifact(view: ArtifactView): string {
   return `[artifact:${view.artifactId} ${view.mediaType} sha256=${view.checksum}] ${view.summary}`
 }
-export function estimateTokens(text: string): number { return Math.max(1, Math.ceil(text.length / 4)) }
+export function estimateTokens(text: string): number {
+  const characters = Array.from(text)
+  const nonAscii = characters.filter((char) => char.codePointAt(0)! > 127).length
+  return Math.max(1, nonAscii + Math.ceil((characters.length - nonAscii) / 4))
+}
 export function buildContext(system: string, history: string[], artifacts: ArtifactView[], tokenBudget: number): string[] {
   const fixed = [system, ...artifacts.map(renderArtifact)]
   let used = fixed.reduce((sum, item) => sum + estimateTokens(item), 0)

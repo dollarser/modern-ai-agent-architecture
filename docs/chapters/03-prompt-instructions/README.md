@@ -213,7 +213,7 @@ print(template.build())
 
 对于复杂任务，提供一个或多个输入输出示例（Few-shot Prompting），显著提升模型输出质量。
 
-> **来源类型：** Fact —— 基于 OpenAI Prompt Engineering Guide 和 Anthropic Prompt Library 的最佳实践
+> **来源类型：** Official Guidance + 工程建议 —— OpenAI 与 Anthropic 文档建议为复杂任务提供示例；实际收益依赖模型、任务和示例质量，应通过评估验证，不能当作无条件事实。
 
 ### 3.2 Prompt 处理流程
 

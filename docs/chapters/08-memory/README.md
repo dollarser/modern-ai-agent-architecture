@@ -90,6 +90,8 @@ python -m unittest discover -s examples/memory/python -p 'test_*.py' -v
 npm --prefix examples/memory/typescript test
 ```
 
+下面的 `MemorySystem` 是章节内的概念组合示意，不是 `examples/memory/` 的逐字副本；完整、受测试的字段治理契约以示例工程为准。本节代码未覆盖生产存储、索引擦除或合规删除，不应脱离边界声明复制到生产。
+
 ```python
 """
 Memory 系统 - 教学实现
@@ -411,19 +413,32 @@ class SemanticMemory(MemorySystem):
 
     def save_with_embedding(self, key: str, content: str,
                             embedding: list[float],
-                            importance: int = 5):
+                            importance: int = 5, *,
+                            tenant_id: str = "default",
+                            subject_id: str = "anonymous",
+                            namespace: str = "saved_note",
+                            consent: bool = False):
         """保存记忆并附带 Embedding"""
-        self.save_to_long_term(key, content, importance)
-        self._embeddings[key] = embedding
+        self.save_to_long_term(
+            key, content, importance, tenant_id=tenant_id,
+            subject_id=subject_id, namespace=namespace, consent=consent,
+        )
+        storage_key = f"{tenant_id}:{subject_id}:{namespace}:{key}"
+        self._embeddings[storage_key] = embedding
 
     def semantic_search(self, query_embedding: list[float],
-                        top_k: int = 5) -> list[MemoryEntry]:
+                        top_k: int = 5, *,
+                        tenant_id: str = "default",
+                        subject_id: str = "anonymous") -> list[MemoryEntry]:
         """基于余弦相似度的语义搜索"""
         scored = []
-        for key, emb in self._embeddings.items():
+        prefix = f"{tenant_id}:{subject_id}:"
+        for storage_key, emb in self._embeddings.items():
+            if not storage_key.startswith(prefix):
+                continue
             similarity = self._cosine_similarity(query_embedding, emb)
             if similarity > 0.5:
-                entry = self.long_term.get(key)
+                entry = self.long_term.get(storage_key)
                 if entry:
                     scored.append((similarity, entry))
 

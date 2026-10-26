@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync, mkdirSync, chmodSync, statSync, readdirSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -124,7 +124,8 @@ await withCheckpoint(async (checkpoint) => {
   assert.equal(result.success, false)
   assert.equal(calls, 0)
   assert.match(result.error ?? "", /审批拒绝/)
-  assert.ok(result.trace.some((item) => item.event === "on_tool_error"))
+  assert.ok(result.trace.some((item) => item.event === "on_approval_rejected"))
+  assert.ok(!result.trace.some((item) => item.event === "on_tool_error"))
 })
 
 await withCheckpoint(async (checkpoint) => {
@@ -152,8 +153,10 @@ await withCheckpoint(async (checkpoint) => {
   const denied = await new DatabaseReviewAgent(checkpoint, {}, { hooks })
     .run("查找数据库配置并给出变更建议", "guard")
   assert.equal(denied.success, false)
-  assert.match(denied.error ?? "", /Guardrail/)
+  assert.match(denied.error ?? "", /Tool 调用管线失败/)
   assert.equal(denied.attempts, 0)
+  assert.ok(denied.trace.some((item) => item.event === "on_tool_error"))
+  assert.ok(denied.trace.some((item) => item.event === "after_tool"))
 })
 
 await withCheckpoint(async (checkpoint) => {
@@ -620,4 +623,291 @@ await withCheckpoint(async (checkpoint) => {
   assert.equal(mismatch.error_code, "checkpoint_mismatch")
 })
 
-console.log("agent-host TypeScript tests: OK")
+
+
+// 安全回归：与 Python 的失败形状逐项对应。
+const planFor = (steps: import("./assembly.js").PlanStep[]) => ({
+  createPlan: async () => steps,
+  finalAnswer: async () => "done",
+})
+const single = (tool = "action", arguments_: Record<string, unknown> = {}) =>
+  [{ id: 1, description: "probe", tool, arguments: arguments_, dependsOn: [] }]
+const securityHost = (checkpoint: string, tool: Tool, dependencies: import("./assembly.js").AgentDependencies = {},
+  config: Partial<import("./assembly.js").AgentConfig> = {}) => {
+  const host = new AgentHost(checkpoint, { allowedTools: new Set(["action"]), ...config }, {
+    llm: planFor(single()), ...dependencies,
+  })
+  host.tools.register(tool)
+  return host
+}
+
+await withCheckpoint(async (checkpoint) => {
+  const root = join(checkpoint, ".."), workspace = join(root, "workspace")
+  mkdirSync(workspace)
+  const target = join(workspace, "calculator.js"), outside = join(root, "outside")
+  writeFileSync(target, "old"); chmodSync(target, 0o640)
+  writeFileSync(outside, "protected")
+  symlinkSync(outside, `${target}.tmp`)
+  const host = new CodingAgent(checkpoint, workspace, {}, {
+    approval: new AutoApproveGate(),
+    llm: planFor(single("apply_patch", { path: "calculator.js", old: "old", new: "new" })),
+  })
+  assert.equal((await host.run("task", "patch")).success, true)
+  assert.equal(readFileSync(outside, "utf8"), "protected")
+  assert.equal(readFileSync(target, "utf8"), "new")
+  assert.equal(statSync(target).mode & 0o777, 0o640)
+  assert.equal(readdirSync(workspace).some((name) => name.startsWith(".agent-write-")), false)
+})
+
+await withCheckpoint(async (checkpoint) => {
+  for (const [index, [allow, deny]] of [
+    [["action", "alias"], ["action"]], [["alias"], []], [["action"], ["alias"]],
+  ].entries()) {
+    let calls = 0
+    const policy = new DefaultPolicyEngine(new Set(allow), [{ scope: ConfigScope.Managed, deny: new Set(deny) }])
+    const host = securityHost(checkpoint, { name: "action", description: "action", handler: () => {
+      calls += 1; return { success: true }
+    } }, { policy, llm: planFor(single("alias")) })
+    host.tools.registerAlias("alias", "action")
+    assert.equal((await host.run("task", String(index))).success, false)
+    assert.equal(calls, 0)
+  }
+})
+
+await withCheckpoint(async (checkpoint) => {
+  const schema = { type: "object", properties: { items: { type: "array", maxItems: 1,
+    items: { type: "object", required: ["n"], properties: { n: { type: "integer", maximum: 10 } }, additionalProperties: false } } } }
+  for (const [index, arguments_] of [
+    { items: [{ n: 999 }] }, { items: [{ n: true }] }, { items: [{}] }, { items: [{ n: 1 }, { n: 2 }] },
+  ].entries()) {
+    let calls = 0
+    const approval = new ScriptedApprovalGate({ action: true })
+    const host = securityHost(checkpoint, { name: "action", description: "action", parameters: schema,
+      requiresApproval: true, handler: () => { calls += 1; return { success: true } },
+    }, { approval, llm: planFor(single("action", arguments_)) })
+    assert.equal((await host.run("task", String(index))).success, false)
+    assert.equal(calls, 0)
+    assert.equal(approval.requests.length, 0)
+  }
+  const { validate } = await import("./schema-validation.js")
+  assert.throws(() => validate({ properties: { absent: { pattern: "x" } } }, {}))
+  assert.throws(() => validate({ maximum: "10" }, {}))
+  validate(schema, { items: [{ n: 10 }] })
+})
+
+await withCheckpoint(async (checkpoint) => {
+  const tool: Tool = { name: "action", description: "action", requiresApproval: true, handler: () => ({ success: true }) }
+  const base = securityHost(checkpoint, tool, {}, { interruptAfterSteps: 0 })
+  assert.equal((await base.run("task", "r")).status, "interrupted")
+  for (const changed of [
+    { ...tool, handler: () => ({ success: false }) },
+    { ...tool, implementationVersion: "2" }, { ...tool, requiresApproval: false },
+  ]) {
+    assert.equal((await securityHost(checkpoint, changed).run("task", "r")).error, "capability_snapshot_mismatch")
+  }
+  const policy = new DefaultPolicyEngine(new Set(["action"]), [{ scope: ConfigScope.Managed, deny: new Set(["action"]) }])
+  assert.equal((await securityHost(checkpoint, tool, { policy }).run("task", "r")).error, "capability_snapshot_mismatch")
+  const state = await base.checkpoints.load("r")
+  assert.ok(state)
+  state.capabilitySnapshot = undefined
+  await base.checkpoints.save(state)
+  assert.equal((await securityHost(checkpoint, tool).run("task", "r")).error, "capability_snapshot_mismatch")
+})
+
+await withCheckpoint(async (checkpoint) => {
+  let target = "first", calls = 0
+  const approval = new ScriptedApprovalGate({ action: false })
+  const host = securityHost(checkpoint, { name: "action", description: "action", requiresApproval: true,
+    prepare: () => ({ target }), handler: () => { calls += 1; return { success: true } },
+  }, { approval })
+  await host.run("task", "r")
+  const state = await host.checkpoints.load("r")
+  assert.ok(state)
+  state.approvals[Object.keys(state.approvals)[0]] = true
+  state.results = {}; state.stepCount = 0
+  await host.checkpoints.save(state)
+  target = "second"
+  assert.equal((await host.run("task", "r")).success, false)
+  assert.equal(approval.requests.length, 2)
+  assert.notEqual(approval.requests[0].id, approval.requests[1].id)
+  assert.equal(calls, 0)
+})
+
+await withCheckpoint(async (checkpoint) => {
+  let calls = 0
+  const host = new AgentHost(checkpoint, { allowedTools: new Set(["write", "cancel"]) }, {
+    llm: planFor([...single("write"), { ...single("cancel")[0], id: 2 }]),
+  })
+  host.tools.register({ name: "write", description: "write", handler: () => { calls += 1; return { success: true } } })
+  host.tools.register({ name: "cancel", description: "cancel", handler: async () => {
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    const error = new Error("cancelled"); error.name = "AbortError"; throw error
+  } })
+  await assert.rejects(host.run("task", "r"), { name: "AbortError" })
+  const state = await host.checkpoints.load("r")
+  assert.ok(state?.results["1"].success)
+  assert.equal(state?.executions["2"], "started")
+  assert.equal((await host.run("task", "r")).status, "reconciliation_required")
+  assert.equal(calls, 1)
+})
+
+await withCheckpoint(async (checkpoint) => {
+  let calls = 0
+  const host = securityHost(checkpoint, { name: "action", description: "slow", handler: async () => {
+    await new Promise((resolve) => setTimeout(resolve, 60)); calls += 1; return { success: true }
+  } }, {}, { stepTimeoutMs: 10 })
+  const result = await host.run("task", "r")
+  assert.equal(result.status, "reconciliation_required")
+  assert.equal(result.results["1"].outcome_unknown, true)
+  await new Promise((resolve) => setTimeout(resolve, 100))
+  assert.equal((await host.run("task", "r")).status, "reconciliation_required")
+  assert.equal(calls, 1)
+})
+
+await withCheckpoint(async (checkpoint) => {
+  const host = securityHost(checkpoint, { name: "action", description: "schema", parameters: {
+    properties: { n: { type: "integer", maximum: 10 } },
+  }, handler: () => ({ success: true }) })
+  const frozen = host.tools.snapshot()
+  const properties = host.tools.get("action").parameters?.properties as Record<string, { maximum: number }>
+  properties.n.maximum = 999
+  assert.equal((frozen.get("action").parameters?.properties as typeof properties).n.maximum, 10)
+})
+
+
+
+await withCheckpoint(async (checkpoint) => {
+  const outside = join(checkpoint, "..", "outside")
+  writeFileSync(outside, "protected")
+  symlinkSync(outside, `${checkpoint}.tmp`)
+  const { JsonCheckpointStore } = await import("./assembly.js")
+  const store = new JsonCheckpointStore(checkpoint)
+  store.save(new RunState("r", "task", []))
+  assert.equal(store.load("r")?.task, "task")
+  const sessionPath = join(checkpoint, "..", "sessions.json")
+  symlinkSync(outside, `${sessionPath}.tmp`)
+  const sessions = new JsonSessionStore(sessionPath)
+  sessions.save({ sessionId: "s", messages: [], tasks: [] })
+  assert.equal(sessions.load("s")?.sessionId, "s")
+  assert.equal(readFileSync(outside, "utf8"), "protected")
+})
+
+await withCheckpoint(async (checkpoint) => {
+  const { JsonCheckpointStore } = await import("./assembly.js")
+  const backing = new JsonCheckpointStore(checkpoint)
+  let active = 0, peak = 0
+  const store = {
+    load: (runId: string) => backing.load(runId),
+    save: async (state: RunState) => {
+      active += 1; peak = Math.max(peak, active)
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 1))
+        backing.save(state)
+      } finally { active -= 1 }
+    },
+  }
+  const host = new AgentHost(checkpoint, { allowedTools: new Set(["a", "b"]) }, {
+    checkpointStore: store, llm: planFor([...single("a"), { ...single("b")[0], id: 2 }]),
+  })
+  for (const name of ["a", "b"]) host.tools.register({ name, description: name, handler: async () => ({ success: true }) })
+  assert.equal((await host.run("task", "r")).success, true)
+  assert.equal(peak, 1)
+  assert.equal(Object.keys(backing.load("r")?.results ?? {}).length, 2)
+})
+
+
+
+await withCheckpoint(async (checkpoint) => {
+  let calls = 0, finals = 0
+  const tool: Tool = { name: "action", description: "action", handler: async () => {
+    calls += 1; await new Promise((resolve) => setTimeout(resolve, 10)); return { success: true }
+  } }
+  const llm = { ...planFor(single()), finalAnswer: async () => `answer-${++finals}` }
+  const a = securityHost(checkpoint, tool, { llm }), b = securityHost(checkpoint, tool, { llm })
+  const [first, second] = await Promise.all([a.run("task", "r"), b.run("task", "r")])
+  assert.equal(first.success && second.success, true)
+  assert.equal(calls, 1); assert.equal(finals, 1)
+  assert.equal(first.final, second.final); assert.equal(second.replayed, true)
+})
+
+await withCheckpoint(async (checkpoint) => {
+  let calls = 0, finals = 0
+  const llm = { ...planFor(single()), finalAnswer: async () => {
+    if (++finals === 1) throw new Error("model unavailable")
+    return "persisted answer"
+  } }
+  const host = securityHost(checkpoint, { name: "action", description: "action", handler: () => {
+    calls += 1; return { success: true }
+  } }, { llm })
+  assert.equal((await host.run("task", "r")).error_code, "runtime_error")
+  assert.equal((await host.run("task", "r")).success, true)
+  assert.equal((await host.run("task", "r")).final, "persisted answer")
+  assert.equal(calls, 1); assert.equal(finals, 2)
+})
+
+await withCheckpoint(async (checkpoint) => {
+  let calls = 0
+  const factory = () => ({ run: async (_task: string, runId: string, context: string[] = []) => {
+    calls += 1; assert.deepEqual(context, [])
+    return { success: true, status: "completed", runId, final: "answer" } as import("./assembly.js").AgentResult
+  } })
+  const app = new ConversationApplication(new JsonSessionStore(checkpoint), factory, undefined, 0)
+  const [a, b] = await Promise.all([app.send("s", "hello", "m"), app.send("s", "hello", "m")])
+  const restarted = new ConversationApplication(new JsonSessionStore(checkpoint), factory)
+  assert.deepEqual(a, b); assert.deepEqual(a, await restarted.send("s", "hello", "m"))
+  assert.equal(calls, 1)
+  await assert.rejects(restarted.send("s", "changed", "m"), /idempotency_key_conflict/)
+  assert.equal(restarted.getSession("s")?.messages.length, 2)
+})
+
+await withCheckpoint(async (checkpoint) => {
+  const runs: string[] = []
+  const app = new ConversationApplication(new JsonSessionStore(checkpoint), () => ({
+    run: async (_task, runId) => {
+      runs.push(runId)
+      if (runs.length === 1) { const error = new Error("cancel"); error.name = "AbortError"; throw error }
+      return { success: true, status: "completed", runId, final: "done" } as import("./assembly.js").AgentResult
+    },
+  }))
+  await assert.rejects(app.send("s", "hello", "m"), { name: "AbortError" })
+  const record = app.getSession("s")!.tasks[0]
+  assert.equal(record.status, "cancelled")
+  await assert.rejects(app.send("s", "hello", "m"), /resume_required/)
+  assert.equal((await app.resume("s", record.taskId)).runId, record.runId)
+  assert.deepEqual(runs, [record.runId, record.runId])
+  assert.equal(app.getSession("s")?.messages.length, 2)
+})
+
+await withCheckpoint(async (checkpoint) => {
+  let entered = 0, release!: () => void
+  const both = new Promise<void>((resolve) => { release = resolve })
+  const app = new ConversationApplication(new JsonSessionStore(checkpoint), () => ({
+    run: async (_task, runId) => {
+      if (++entered === 2) release()
+      let timer: ReturnType<typeof setTimeout>
+      await Promise.race([both, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("sessions serialized")), 200) })])
+        .finally(() => clearTimeout(timer))
+      return { success: true, status: "completed", runId, final: "done" } as import("./assembly.js").AgentResult
+    },
+  }))
+  await Promise.all([app.send("s1", "a"), app.send("s2", "b")])
+  assert.equal(entered, 2)
+})
+
+await withCheckpoint(async (checkpoint) => {
+  let calls = 0
+  const host = securityHost(checkpoint, { name: "action", description: "slow", handler: async () => {
+    await new Promise((resolve) => setTimeout(resolve, 50)); calls += 1; return { success: true }
+  } }, {}, { stepTimeoutMs: 5 })
+  assert.equal((await host.run("task", "r")).error_code, "unknown_side_effect")
+  const verify = async () => ({ evidence: "test-downstream-receipt-1", result: { success: true, remoteId: "1" } })
+  await assert.rejects(host.reconcile("r", 1, verify), /execution_still_active/)
+  await new Promise((resolve) => setTimeout(resolve, 80))
+  await assert.rejects(host.reconcile("r", 1, () => ({ evidence: "", result: { success: true } })), /invalid_reconciliation_receipt/)
+  const state = await host.reconcile("r", 1, verify)
+  assert.equal(state.trace.at(-1)?.event, "execution_reconciled")
+  assert.equal((await host.run("task", "r")).success, true)
+  assert.equal(calls, 1)
+})
+
+console.log("agent-host TypeScript tests: OK (security and reliability regressions)")

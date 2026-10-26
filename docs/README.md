@@ -34,7 +34,7 @@
 
 ## 内容概览
 
-全书共 20 章，分为六个部分：
+全书分为六个部分：
 
 | 模块 | 章节 | 主题 |
 |------|------|------|
@@ -83,11 +83,11 @@ npm run start
 
 ```text
 .
-├── docs/                  # 书稿、20 章正文、附录与 MkDocs 首页
-├── examples/              # 18 个独立 Python/TypeScript 示例工程
+├── docs/                  # 书稿、正文、附录与 MkDocs 首页
+├── examples/              # Python/TypeScript 独立示例工程
 ├── specs/                 # 现行书籍规范、共创方法与历史需求归档
 ├── reviews/               # 审查报告、出版基线与维护记录
-├── scripts/               # 内部链接和 Mermaid 校验脚本
+├── scripts/               # 出版基线、链接、源码摘录与 Mermaid 校验脚本
 ├── .github/workflows/     # 构建、链接、图表与双语言 CI
 ├── mkdocs.yml             # MkDocs 配置
 ├── requirements-docs.txt  # 固定的文档构建依赖
@@ -96,21 +96,15 @@ npm run start
 └── README.md              # GitHub 项目入口
 ```
 
-## 验收指标
+## 质量与验收
 
-| 指标 | 目标 | 状态 |
-|------|------|------|
-| 正文字量 | 以结构完整、可导航、无明显重复和可维护为准 | ✅ |
-| 章节数 | 20 章 | ✅ |
-| Mermaid 图 | 57 张 | ✅ 已满足 |
-| 可运行代码示例 | 18 个独立工程、Python/TypeScript 共 36 个入口；包含 A2A Task/Artifact、Skill/Plugin 安装、MCP Server 管理、评估契约、模型能力契约与可插拔 Agent Host | ✅ 已验证 |
-| 简单编码任务闭环 | 受限工作区内读取/搜索 → Patch → 测试 → 结果汇报；覆盖默认拒绝和路径越界 | ✅ 双语言纵向切片已验证；生产沙箱不在教学实现范围内 |
-| 多轮对话身份闭环 | Session 聚合 Message；每条用户消息创建独立 Task/Run；历史经裁剪进入新 Run | ✅ 双语言 Application 层契约已验证 |
-| Markdown 表格 | 160 个（当前清点；不以数量作为质量目标） | ✅ 已清点 |
-| 完整术语表 | 1 份 | ✅ |
-| 官方参考文献 | 每章至少一个可追溯来源；协议和产品事实使用直接官方来源 | ⚠️ 需定期校验链接 |
-| 框架分析 | 6 个代表性方案，区分公开事实与推导 | ✅ |
-| 学习路线 | 10 阶段 | ✅ |
+当前章节、图表、示例、入口和测试数量只在[出版基线](https://github.com/dollarser/modern-ai-agent-architecture/blob/main/specs/book/11-current-baseline.md)维护，避免首页、验收标准和索引分别更新后产生漂移。
+
+- 正文以结构完整、可导航、无明显重复和可维护为准，不把篇幅或图表数量当作扩写目标。
+- 示例必须能在声明环境中运行；受控编码闭环覆盖默认拒绝和路径越界，但不把教学实现描述为生产沙箱。
+- Session、Message、Task 与 Run 的身份关系由双语言 Application 契约验证。
+- 协议和产品事实使用可追溯的直接来源，并按核查日期维护。
+- 发布前执行 MkDocs、内部链接、Mermaid、源码摘录、Python/TypeScript 和格式检查。
 
 ## 写作原则
 

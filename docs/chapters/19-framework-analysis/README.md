@@ -4,8 +4,8 @@
 > **所属模块：** 第六部分：案例、选型与索引
 > **来源可信度：** 官方文档 / 源码 / 推导 / 观点
 > **状态：** ✅ 已完成
-> **事实核查日期：** 2026-07-24
-> **核查范围：** 产品能力会变化；表中“官方文档”仅表示可在对应公开资料中核查，闭源内部机制仍按推导处理。每次版本更新应复核第 12 节链接和本章对比表。
+> **事实核查日期：** 2026-10-26
+> **核查范围：** 本轮阅读官方文档与公开仓库说明，并记录开源项目的提交快照。没有安装运行竞品、复现安全边界或测量性能；文档能力记为 Official Fact，运行效果和未查证字段记为 Unknown，不把开源声明等同于验证通过。
 
 ---
 
@@ -68,7 +68,7 @@ graph TD
 
 ## 2. 分析维度
 
-每个框架从以下 8 个维度分析。这里的「支持」指公开文档可确认的产品或 SDK 能力，不等同于公开了内部实现；闭源产品的 Runtime、Planner 和上下文选择策略通常只能作推断。
+本章用以下 14 个维度指导选型。第 3～8 节只写已核查的产品边界；第 8.7 节集中比较开源项目的 6 个治理维度，不把缺少证据的格子填成“不支持”。未覆盖的维度为 `Unknown（未核查）`。支持某能力不等于已验证其生产效果；闭源产品的内部 Runtime、Planner 与上下文选择算法不作事实断言。
 
 | 维度 | 说明 |
 |------|------|
@@ -106,292 +106,101 @@ graph TD
 
 ## 3. GitHub Copilot
 
-### 3.1 概述
+**核查对象：** GitHub.com Surface。官方描述了仓库问答、委派编码、PR 审查与自动化；多步任务可以在云开发环境中读写文件和执行测试。不能把这些行为反推为所有 IDE 插件都使用同一个内部 Planner。
 
-GitHub Copilot 是 GitHub 与 OpenAI 合作开发的 AI 编程助手，深度集成到 VS Code、JetBrains 等 IDE 中。它从最初的代码补全工具逐步演进为具有 Agent 能力的完整编程助手。
+**架构启示（推导）：** 把 Issue / PR / 自动化触发等产品入口与具体执行环境分开，产物回到仓库工作流。为试点记录仓库权限、触发身份和执行环境，不能仅写“Copilot 支持 Agent”。数据保留、恢复语义和跨 Surface 权限等价性为 Unknown，需专项验证。
 
-**定位：** IDE 内嵌的 AI 编程伙伴
-
-**核心能力：** 代码补全、Chat、Agent 模式、代码审查、CLI
-
-> **来源类型：** Fact —— 基于 GitHub Copilot 官方文档
-
-### 3.2 架构分析
-
-| 维度 | 分析 | 来源可信度 |
-|------|------|-----------|
-| Runtime | 基于 IDE 扩展进程，通过 VS Code Extension API 与编辑器交互。Agent 模式引入了多步骤推理循环。 | 推导 |
-| Planner | 隐式规划为主，通过模型推理确定下一步操作。GitHub Copilot Chat 的 Agent 模式支持基本的任务分解。 | 推导 |
-| Tool Registry | 公开产品提供文件、代码搜索、终端和 Git 等能力；具体可用工具会随客户端、模式和权限配置而变化。 | 官方文档 |
-| Memory | 依赖 IDE 的工作区上下文（打开的文件、光标位置、最近编辑）。对话历史限制在合理长度内。 | 推导 |
-| MCP Client | 支持 MCP 协议，可以连接 MCP Server 扩展工具能力。 | 官方文档 |
-| Hooks | 通过 VS Code Extension API 实现生命周期管理。 | 推导 |
-| Skills | GitHub 已公开 Agent Skills；不同 Copilot Surface 的发现位置、组织策略与可用范围仍需按官方文档核查。 | 官方文档 |
-| Context 管理 | 可使用工作区、打开文件、编辑器状态等上下文；具体检索和排序策略没有完整公开，不应视为固定算法。 | 推导 |
-
-### 3.3 设计特点
-
-**优势：**
-- 与 IDE 的深度集成，上下文感知能力强
-- 同时覆盖代码补全、Chat、Agent 模式和代码审查等开发环节
-- 可复用 VS Code 与 GitHub 生态中的工作区和协作上下文
-
-**局限：**
-- 具体 Agent 能力随客户端、订阅、模式与组织策略变化，需要按目标环境验证
-- 工作流主要由产品界面和公开扩展点控制，不能假定可替换其内部 Runtime
-- 闭源部分的规划、检索和上下文排序机制无法从公开资料完整核查
-
-> **来源类型：** 推导分析 —— 基于使用体验和公开文档
-
----
+来源：[Copilot on GitHub.com](https://docs.github.com/en/copilot/concepts/copilot-surfaces/copilot-on-github)。
 
 ## 4. Claude Code
 
-### 4.1 概述
+**核查对象：** 官方多平台产品概览。终端、IDE、桌面、云端和远程控制是不同使用入口；官方文档分别讨论 Session、Instructions / Memory、扩展与权限。具体部署的可用功能仍受版本和配置约束。
 
-Claude Code 是 Anthropic 推出的 Agentic Coding 工具，可用于终端、IDE、桌面应用和 Web。它仍是本书观察终端 Agent 的代表性案例，但不能再将产品整体等同于 CLI；公开资料可确认其部分 Tool、MCP、Hooks、Skills 与项目指令能力，不能据此推断它“完整实现了”本书的所有抽象组件。
+**架构启示（推导）：** 多界面不应各自拥有一套执行事实；Host 应统一 Session、运行状态、审批请求与事件投影。CLI 的权限设置不能直接外推到云端隔离环境；模型内部规划和服务端实现为 Unknown。
 
-**定位：** 跨终端、IDE、桌面与 Web 的编码 Agent
-
-**核心能力：** 代码生成、文件操作、Shell 执行、MCP 集成、Skills 系统、Hooks 系统
-
-> **来源类型：** Fact —— 产品定位与所列公开能力基于 Claude Code 官方文档；内部架构仍按后文的推导处理
-
-### 4.2 架构分析
-
-| 维度 | 分析 | 来源可信度 |
-|------|------|-----------|
-| Runtime | 可执行多轮工具调用；内部步骤不公开，`Reasoning → Planning → Tool Calling → Observation` 是本书的分析模型，而不是官方公开的实现流程。 | 推导 |
-| Planner | 可观察到多步 Tool 交互；具体规划算法、是否形成显式计划及其表示方式未完整公开。 | 推导 |
-| Tool Registry | 公开产品提供文件、Shell、搜索等内置能力，并可配置 MCP 扩展；内部注册与路由机制未公开。 | 官方文档 / 推导 |
-| Memory | 会话、工作区和项目指令可提供上下文；记忆命令与持久化范围应以所用版本的官方文档为准。 | 官方文档 / 推导 |
-| MCP Client | 支持连接 MCP Server；具体版本、传输和产品交互以官方文档为准。 | 官方文档 |
-| Hooks | 提供文档化的生命周期 Hook，可用于执行前后控制和通知；具体事件名与行为以所用版本文档为准。 | 官方文档 |
-| Skills | 支持文档化的 Skills 扩展机制；加载方式、作用域和模板格式以所用版本文档为准。 | 官方文档 |
-| Context 管理 | 公开资料可确认其会利用项目指令、工作区和会话上下文；具体文件选择、压缩与 Token 预算策略未完整公开。 | 推导 |
-
-### 4.3 设计特点
-
-**优势：**
-- 公开文档覆盖终端 Tool、MCP、Hooks、Skills 等多个主题，是本书的有用案例
-- 与开发工具链集成紧密，适合观察终端 Agent 的权限与交互边界
-- 终端形态便于与脚本、版本控制和现有开发命令组合
-
-**局限：**
-- 不同 Surface 的能力、权限和自动化边界并不完全相同，团队采用前需要分别验证终端、IDE、桌面与 Web 工作流
-- 模型、云提供商和认证方式存在版本与部署差异，应按官方支持矩阵验证
-- 作为闭源产品，内部规划、上下文选择和 Tool 路由细节不能从公开资料完整核查
-
-> **来源类型：** 推导分析 —— 基于官方文档和使用体验
-
----
+来源：[Claude Code Overview](https://code.claude.com/docs/en/overview)。
 
 ## 5. Cursor
 
-### 5.1 概述
+**核查对象：** Agent 与 Agent Skills 官方文档。当前 Cursor 已有独立的 Skills，支持目录发现、按需加载和手动调用；不能再以“只有 Rules、没有 Skills”描述它。Rules 与 Skills 仍是不同用途的扩展面。
 
-Cursor 是一款 AI-first 的代码编辑器，基于 VS Code 深度定制，将 AI 能力直接嵌入编辑器的核心体验中。
+**架构启示（推导）：** 文件格式兼容不意味着部署范围相同。官方 Skills 文档明确区分本地用户目录与云端 / 远程 Worker，不能假定用户本地 Skill 自动随任务上传。上下文目录、安装来源、同步和执行授权应分别建模。
 
-**定位：** AI-first IDE
+来源：[Agent Overview](https://cursor.com/docs/agent/overview)、[Agent Skills](https://cursor.com/docs/skills)。
 
-**核心能力：** Tab 补全、内联编辑、Chat、Composer（Agent 模式）、代码库索引
+## 6. OpenAI Agents SDK 与托管 Runtime
 
-> **来源类型：** Fact —— 基于 Cursor 官方文档
+**核查对象：** Agents SDK 与官方 Runtime 分层说明。Agents SDK 在应用中运行，由应用选择存储、审批和运行环境；Agents API 提供托管 Codex harness；Responses API 提供模型与工具调用接口。三者承担的运行责任不同，不能把 SDK 等同于托管长任务服务。
 
-### 5.2 架构分析
+SDK 文档列出了 Agent / Runner、Tools、Handoffs、Guardrails、Sessions 与 Tracing。Session 保存对话不等于任意外部写操作都能安全恢复；Checkpoint、幂等与副作用核对仍需按具体适配器验证。跨 Provider 的 Tool、结构化输出、用量和取消等价性为 Unknown，需同任务测试。
 
-| 维度 | 分析 | 来源可信度 |
-|------|------|-----------|
-| Runtime | 基于 Composer 的 Agent 模式，支持多步骤自动化操作。与编辑器深度集成，操作结果实时反映在 UI 中。 | 推导 |
-| Planner | 模型内隐式规划，通过 Composer 的多步迭代实现任务分解。 | 推导 |
-| Tool Registry | Agent 可使用编辑器提供的文件、搜索、终端等能力；实际工具集和权限策略随产品版本、模式与配置变化。 | 推导 |
-| Memory | 代码库索引（Codebase Indexing）提供项目级上下文。通过 `.cursor/rules/` 目录（原 `.cursorrules`）定义行为准则。 | 官方文档 |
-| MCP Client | 支持 MCP 协议，可连接外部 MCP Server。 | 官方文档 |
-| Hooks | 通过编辑器事件系统实现，非独立 Hook 框架。 | 推导 |
-| Skills | Rules 用于持久化指令，并非本书定义的可发现、可编排 Skill Registry；不要将两者等同。 | 推导 |
-| Context 管理 | 代码库索引 + 当前文件 + 相关文件 + 聊天历史。使用 @ 符号引用特定上下文。 | 官方文档 |
+**架构启示（推导）：** 选型先问“谁负责运行、存储和隔离”，再比较 API 便利性。新版本还提供 Sandbox Agents 等集成，故“SDK 永远不提供沙箱集成”也不是可靠结论；隔离强度取决于实际后端。
 
-### 5.3 设计特点
+来源：[SDK 官方文档](https://openai.github.io/openai-agents-python/)、[Runtime 责任比较](https://developers.openai.com/api/docs/guides/agents#compare-agent-runtime-options)。
 
-**优势：**
-- 将补全、对话、多文件编辑和 Agent 操作集中在编辑器工作流中
-- 代码库索引可提供项目级检索上下文
-- 编辑结果可直接在工作区中检查和继续修改
+## 7. LangGraph 与 Deep Agents
 
-**局限：**
-- 闭源部分的索引、排序和规划机制不能从公开资料完整核查
-- 能力与编辑器客户端深度绑定，不适合直接等同于可嵌入的通用 Agent SDK
-- 功能、模式名称和权限边界持续演进，需要绑定版本复核
+**核查对象：** LangGraph Persistence 与 Deep Agents Overview。LangGraph 用 Checkpointer 保存线程内图状态，用 Store 保存跨线程数据；前者支持中断、恢复与历史状态，后者承载长期信息。两者不能只用一个“Memory”标签概括。
 
-> **来源类型：** 推导分析 —— 基于使用体验和公开文档
+Deep Agents 在这一生态中提供组合好的 harness，包含文件系统上下文管理、子代理委派与记忆，并可按需扩展规划和 Skills。它与自定义状态图处在不同抽象层，不能简单列为两个互斥竞争框架。
 
----
+**架构启示（推导）：** 需要自定义控制图时比较 LangGraph；需要现成循环与上下文能力时比较 Deep Agents。后者的虚拟文件系统和 Middleware 不是 OS 隔离的同义词。官方文档还指出，文件系统 Tool Allowlist 不约束自定义 Tool，声明式子代理需要独立配置相应限制；因此必须审查每条执行路径。
 
-## 6. OpenAI Agents SDK
-
-### 6.1 概述
-
-OpenAI Agents SDK 是 OpenAI 推出的通用 Agent 构建框架，提供了一套完整的 Agent 开发工具。
-
-**定位：** 通用 Agent SDK
-
-**核心能力：** Agent 定义、Tool 管理、Handoff、Guardrails、Hooks、Sessions、Tracing
-
-> **来源类型：** Fact —— 基于 OpenAI Agents SDK 官方文档和源码
-
-### 6.2 架构分析
-
-| 维度 | 分析 | 来源可信度 |
-|------|------|-----------|
-| Runtime | 基于 `Runner` 类的 Agent 循环。支持 `run()` 和 `run_streamed()` 两种模式。 | 官方源码 |
-| Planner | 模型内隐式规划，通过 `instructions` 和 system prompt 指导规划行为。 | 官方文档 |
-| Tool Registry | 函数式 Tool 定义，支持 `@function_tool` 装饰器。内置 Handoff 机制实现 Agent 间控制权转移。 | 官方文档 |
-| Memory | Run history 可由应用显式传入，也可通过 Sessions 持久化；Sessions 提供 SQLite、Redis、SQLAlchemy、Dapr、MongoDB、加密 Session 等实现，`context` 用于运行期依赖而不是模型可见历史。 | 官方文档 |
-| MCP Client | 支持 MCP 协议，可集成 MCP Server。 | 官方文档 |
-| Hooks | 提供 Run/Agent 生命周期 Hooks；Tool 与 Agent Guardrail 结果、Handoff 和模型/Tool 调用可进入 Trace。 | 官方文档 |
-| Skills | 无独立 Skills 概念，通过 `instructions` + `function_tool` 组合实现。 | 官方文档 |
-| Context 管理 | Run 输入和 `context` 用于传递运行期状态；较长会话的保存、裁剪与恢复应通过 Sessions 或应用层策略实现，不能假定 SDK 会自动完成。 | 官方文档 |
-
-### 6.3 设计特点
-
-**优势：**
-- 设计简洁，学习曲线平缓
-- Handoff 机制是 Agent 间协作的创新设计
-- 内置 Tracing，便于调试和监控
-- 开源，可定制和扩展
-
-**局限：**
-- 相对较新，生态不如 LangGraph 成熟
-- 默认路径针对 OpenAI Responses API 优化；使用非 OpenAI Provider 时需逐项验证 Tool、结构化输出、多模态和用量统计等兼容性
-- 没有与本书第 12 章完全等价的独立 Skill Registry；可通过 instructions、Tool、Handoff 或应用层扩展组合工作流
-- Hooks 已覆盖 Run/Agent、LLM、Tool 与 Handoff 生命周期；是否满足治理需求应按具体事件、失败语义和隔离边界验证，不宜用笼统的“成熟度”排序
-
-> **来源类型：** 推导分析 —— 基于源码和官方文档
-
----
-
-## 7. LangGraph
-
-### 7.1 概述
-
-LangGraph 是 LangChain 团队推出的基于图状态机的 Agent 框架。它将 Agent 工作流建模为有向图（Graph），节点代表操作，边代表状态转移。
-
-**定位：** 图状态机 Agent 框架
-
-**核心能力：** 图定义、状态管理、条件分支、循环、人工介入、持久化
-
-> **来源类型：** Fact —— 基于 LangGraph 官方文档
-
-### 7.2 架构分析
-
-| 维度 | 分析 | 来源可信度 |
-|------|------|-----------|
-| Runtime | 基于图执行引擎。`StateGraph` 定义状态和转移，编译后执行。支持 `invoke()`、`stream()` 等调用方式。 | 官方文档 |
-| Planner | 通过图结构定义规划逻辑。支持条件边（`add_conditional_edges`）实现动态路由。 | 官方文档 |
-| Tool Registry | 通过 `ToolNode` 和 `tools` 参数管理。与 LangChain 的 Tool 生态集成。 | 官方文档 |
-| Memory | 可通过 `checkpointer` 持久化图状态，并选择 SQLite、Postgres 等后端；保存、恢复范围和部署语义取决于配置。 | 官方文档 |
-| MCP Client | 通过 LangChain 的 MCP 集成支持。 | 官方文档 |
-| Hooks | 通过节点前后处理函数和 `interrupt` 机制实现。 | 官方文档 |
-| Skills | 无独立 Skills 概念，通过子图（subgraph）实现可复用工作流。 | 官方文档 |
-| Context 管理 | 状态对象（`State`）承载上下文。支持自定义 State Schema。 | 官方文档 |
-
-### 7.3 设计特点
-
-**优势：**
-- 图模型直观，适合复杂工作流
-- 状态持久化是核心特性，支持中断恢复
-- 人工介入（Human-in-the-Loop）支持完善
-- 生态成熟，文档丰富
-
-**局限：**
-- 图模型对简单任务过度设计
-- 学习曲线较陡
-- 依赖 LangChain 生态，耦合度较高
-
-> **来源类型：** 推导分析 —— 基于官方文档和源码
-
----
+来源：[LangGraph Persistence](https://docs.langchain.com/oss/python/langgraph/persistence)、[Deep Agents Overview](https://docs.langchain.com/oss/python/deepagents/overview)、[开源仓库](https://github.com/langchain-ai/deepagents)。
 
 ## 8. Continue
 
-### 8.1 概述
+**核查对象：** 官方首页与配置导航。Continue 提供 VS Code / JetBrains 扩展及 CLI，包含 Agent、Chat、Edit 与 Autocomplete。当前导航使用 Models、MCP Servers、Rules、Prompts 和 `config.yaml`，并将旧 Context Providers 等入口标为 Deprecated。
 
-Continue 是开源的 AI 代码助手，以 VS Code / JetBrains 插件形式运行。支持多种 LLM 提供商，强调开放性和可定制性。
+**架构启示（推导）：** 编辑器上下文、模型角色和工具配置应有明确兼容边界。旧教程中的 `@Codebase` 或 Context Provider 配置不能直接当成当前推荐接入方式；内部 Planner、跨进程恢复和隔离强度为 Unknown，不能用社区规模或“Agent 较新”代替分析。
 
-**定位：** 开源 IDE AI 插件
+来源：[Continue Docs](https://docs.continue.dev/)。
 
-**核心能力：** Chat、Autocomplete、Edit、Agent 模式、模型切换
+### 8.5 开源 Harness 与个人助理：公开能力和取舍
 
-> **来源类型：** Fact —— 基于 Continue 官方文档
+下表中的能力是本轮文档核查结果；“启示”是本书推导。各项目没有在统一环境下进行性能、安全或成功率对比。
 
-### 8.2 架构分析
+| 项目 | 已确认的公开设计 | 可以借鉴的取舍 | 直接来源 |
+|------|------------------|----------------|----------|
+| Codex | 开源 CLI、SDK 与 app-server；应用可通过协议管理 Thread、Turn、流式事件与审批 | 产品上下文和业务授权归应用，Agent 循环与运行协议可以复用；模型与托管服务不因 harness 开源而开源 | [平台分层说明](https://developers.openai.com/blog/codex-as-a-platform) |
+| OpenCode | `allow / ask / deny` 权限，模式规则最后匹配者生效；工作区外路径有独立授权 | 策略顺序和路径范围必须可解释；不能把多个项目的规则列表直接拼接 | [Permissions](https://opencode.ai/docs/permissions/) |
+| OpenHands | 主仓库管理 Agent Canvas 与本地编排，SDK 仓库拥有 Agent Server、Tools、Conversations、Workspaces 与 Events；Automation 决定何时派发 | UI、触发调度与执行事实分开拥有，减少重复 Runtime | [主仓库职责表](https://github.com/OpenHands/OpenHands)、[SDK](https://github.com/OpenHands/software-agent-sdk) |
+| Hermes Agent | 按需加载的 Skills、持久记忆、MCP、Cron 与多消息平台入口 | 用户偏好与可执行工作流分开；自动产生的 Skill 仍需来源和权限审查 | [Skills](https://hermes-agent.nousresearch.com/docs/user-guide/features/skills)、[项目文档入口](https://github.com/NousResearch/hermes-agent) |
+| OpenClaw | Gateway 统一 Session、Tools、Events 和 Channel；安全文档说明一个 Gateway 对应一个信任边界 | 消息接入不自动构成多租户隔离；不互信用户应拆分凭据与执行边界 | [项目说明](https://github.com/openclaw/openclaw)、[Security](https://docs.openclaw.ai/gateway/security) |
+| Deep Agents | 组合文件系统上下文、委派与记忆，支持多种 Backend | 按能力选择 Middleware 和 Backend，分别验证主 Agent、自定义 Tool 与子代理 | [Overview](https://docs.langchain.com/oss/python/deepagents/overview) |
 
-| 维度 | 分析 | 来源可信度 |
-|------|------|-----------|
-| Runtime | 基于插件架构，通过 IDE API 与编辑器交互。Agent 模式引入多步骤循环。 | 官方源码 |
-| Planner | 模型内隐式规划，通过 system prompt 和 slash commands 指导行为。 | 官方文档 |
-| Tool Registry | 插件内置工具：文件操作、终端、搜索。通过 MCP 和自定义 Tool 扩展。 | 官方文档 |
-| Memory | 对话历史管理。通过 `@` 上下文引用（文件、文件夹、URL 等）提供上下文。 | 官方文档 |
-| MCP Client | 支持 MCP 协议，可连接 MCP Server。 | 官方文档 |
-| Hooks | 通过插件生命周期和自定义 slash commands 实现类似功能。 | 推导 |
-| Skills | 通过 slash commands 和 rules 实现工作流模板。 | 官方文档 |
-| Context 管理 | 支持多种上下文提供者（文件、文件夹、Git diff、终端输出等）。 | 官方文档 |
+“开源”只说明可检查、修改和分发的范围，实际许可证需按采用的提交和子目录确认。开源不保证隔离、可靠恢复、模型可离线使用或托管服务免费。
 
-### 8.3 设计特点
+### 8.6 移动端与 GUI Agent：把动作接口和评估环境分开
 
-**优势：**
-- 完全开源，社区驱动
-- 模型无关，支持多种 LLM 提供商
-- 可定制性强，支持自定义 slash commands 和 rules
-- 与多种 IDE 兼容
+[AndroidWorld](https://github.com/google-research/android_world) 提供运行在 Android 模拟器上的任务环境、参数化任务和可检查的奖励信号。它是评估环境，不是可直接嵌入手机的生产 Agent Host。
 
-**局限：**
-- Agent 能力相对较新
-- 社区规模小于 Copilot 和 Cursor
-- 部分功能仍在快速迭代中
+对 Helix 这类设备 Agent，可以借鉴其前置状态构造和结果检查方法：固定应用版本与任务种子，执行后读取可核验的业务状态，而不是仅看 Agent 最后的“已完成”。模拟器权限和重置能力不能直接外推到普通手机；Accessibility、Shizuku、Root 等权限组合需要独立验收，详见[第 17 章](../17-engineering-practice/README.md)和[第 18 章](../18-best-practices/README.md)。这里给出的是工程方法，不声称这些项目已在本书中完成设备接入。
 
-> **来源类型：** 推导分析 —— 基于官方文档和源码
+### 8.7 六个治理维度的证据矩阵
 
----
+`文档` 表示公开资料有对应设计，未做运行验证；`Unknown` 表示本轮没有足够证据。每格仅覆盖写出的范围，不是完整功能勾选表。
 
-## 8.5 补充对标：Codex、OpenCode、Hermes Agent 与 OpenClaw
+| 项目 | Agent / Host 形态 | 状态与恢复 | Sandbox / Workspace | Approval / Policy | 互操作 | Evaluation / Trace |
+|------|------------------|------------|---------------------|-------------------|--------|--------------------|
+| Codex | 文档：CLI / SDK / app-server | 文档：Thread / Turn；外部副作用恢复 Unknown | 文档：配置的 Sandbox；效果未测 | 文档：审批请求；业务授权仍归应用 | 文档：应用提供 MCP；协议版本需核查 | 文档：事件流；评估效果 Unknown |
+| OpenCode | 文档：开源 Coding Agent | Unknown：本轮未核查恢复存储 | 文档：外部目录权限；OS 隔离 Unknown | 文档：三态与最后匹配规则 | Unknown：本轮未逐版本核查 | Unknown |
+| OpenHands | 文档：Canvas / SDK / Server / Automation 分层 | 文档：Conversation / Event；崩溃一致性 Unknown | 文档：Workspace；后端隔离未测 | Unknown：本轮未核查持久审批 | Unknown：本轮未做兼容测试 | 文档：Events；评估效果 Unknown |
+| Hermes Agent | 文档：个人助理、多通道与 Cron | 文档：持久记忆；运行恢复 Unknown | 文档：容器隔离入口；未测 | 文档：命令审批；持久性 Unknown | 文档：MCP 接入；版本 Unknown | Unknown |
+| OpenClaw | 文档：Gateway 与多 Channel | 文档：Session；副作用恢复 Unknown | 文档：主 Session 默认 Host 执行，可配置 Sandbox | 文档：配对与信任边界；非敌对多租户边界 | Unknown：本轮未做版本兼容验证 | 文档：Events；质量评估 Unknown |
+| Deep Agents | 文档：基于 LangGraph 的 harness | 文档：生态持久化；具体配置需验证 | 文档：Backend；虚拟文件系统不等于 OS Sandbox | 文档：文件系统 Tool 限制；自定义 Tool 另审 | Unknown：本轮未做协议兼容测试 | Unknown：未跑统一评估 |
 
-这些项目覆盖了第 12～16 章新增的安装型扩展、作用域、策略和 Host 生命周期，不应只在第 16 章审查中出现。这里保留可由官方文档或开源仓库确认的边界，不推断闭源内部 Planner。
+官方页面可以随时变化。复现本轮研究时使用以下默认分支快照；**这些 SHA 是读取仓库元数据时的定位记录，不表示本书逐行审计了该提交，更不表示稳定 Release 或生产推荐版本。**
 
-公开能力证据表：
-
-| 产品 / 项目 | 可核查的扩展与治理能力 | 证据类型 |
-|-------------|------------------------|----------|
-| Codex | Skills、MCP、项目配置、Sandbox 与 Approval；MCP 支持 stdio 和 Streamable HTTP，并支持 Bearer/OAuth | Official Fact + Public Behavior |
-| OpenCode | 本地/远程 MCP、OAuth、Plugin、Skills，以及 `allow / ask / deny` 权限 | Official Fact |
-| Hermes Agent | 渐进式 Skills、信任/扫描/隔离、多个 Plugin 来源、MCP 与命令审批 | Official Fact + Public Behavior |
-| OpenClaw | Skills、Tool 策略与可组合扩展面 | Official Fact + Inference |
-
-架构启示表：
-
-| 产品 / 项目 | 本书可借鉴的架构启示 |
-|-------------|----------------------|
-| Codex | 配置作用域、运行授权和 Sandbox 是不同层；共享 MCP 配置不表示每次调用自动获准 |
-| OpenCode | 统一三态 Policy 比散落的布尔开关更易审计；大量 MCP Tool 需要按需发现和上下文预算 |
-| Hermes Agent | 安装来源、供应链信任、运行权限和隔离必须分层 |
-| OpenClaw | 扩展发现不应绕过 Host 的 Tool Policy；用户控制和来源信息应进入运行治理 |
-
-**官方或一手资料：** [Codex MCP](https://developers.openai.com/codex/mcp/)、[Codex Skills](https://developers.openai.com/codex/skills/)、[Codex Security](https://developers.openai.com/codex/security/)、[OpenCode MCP](https://opencode.ai/docs/mcp-servers/)、[OpenCode Permissions](https://opencode.ai/docs/permissions/)、[Hermes Agent](https://github.com/nousresearch/hermes-agent)、[OpenClaw Tools](https://github.com/openclaw/openclaw/blob/main/docs/tools/index.md)。
-
-## 8.6 按产品形态补充对标
-
-不同项目的共同价值不在于“谁更像 Agent”，而在于它们把模型决策放进了什么 Host 和执行边界：
-
-| 形态 | 代表项目 | 一等资源 | 主要工程问题 |
-|------|----------|----------|--------------|
-| Agent Framework / SDK | OpenAI Agents SDK、LangGraph、Google ADK、Pydantic AI | Agent、Graph、Runner、Session、Tool、Trace | 编排、类型/Schema、状态、评估和模型替换 |
-| Personal Assistant Host | Open WebUI、Hermes Agent、OpenClaw | User、Channel、Session、Memory、Trigger、Connector | 隐私、主动任务、记忆删除、通知和多租户 |
-| Code Agent | OpenHands、SWE-agent、Aider、Cline | Workspace、Repository、Worktree、Patch、Test、Artifact | 沙箱、代码变更、验证反馈、审批和供应链 |
-| Agent Interoperability | MCP、A2A、ACP 生态 | Server、Agent Card、Task、Artifact、Session | 发现、版本、认证、能力协商和跨信任边界 |
-
-这些项目不能用同一张“功能越多越好”的排行榜比较。SDK 需要看可编排性与可测试性，个人助理需要看身份、数据和主动任务治理，Code Agent 需要看 Workspace/Sandbox/Verifier，互操作协议需要看版本、认证、任务状态和产物交付。
-
-> **来源类型：** Fact + 推导分析 —— 项目定位以其公开仓库和文档为准；表中的“一等资源”和“主要工程问题”是本书对公开能力的架构归纳，不推断闭源内部实现。
+| 仓库 | 分支 | 2026-10-26 核查快照 |
+|------|------|--------------------|
+| openai/codex | main | [970111f6cb62](https://github.com/openai/codex/commit/970111f6cb62cc02fe36a82ea7d71b37a2889c97) |
+| anomalyco/opencode | dev | [d8607b6616a5](https://github.com/anomalyco/opencode/commit/d8607b6616a50d6b89dba2ed46fec99c9457cc97) |
+| NousResearch/hermes-agent | main | [25db5877c1c7](https://github.com/NousResearch/hermes-agent/commit/25db5877c1c78ff13878fa86bab21ba6c9636231) |
+| openclaw/openclaw | main | [eff88aecc7a4](https://github.com/openclaw/openclaw/commit/eff88aecc7a484080747e1e7c89e0e9d1232e83e) |
+| OpenHands/software-agent-sdk | main | [e324989c4153](https://github.com/OpenHands/software-agent-sdk/commit/e324989c415334eb3fcefcb5dffafa194a409471) |
+| langchain-ai/deepagents | main | [bcad8dffff4d](https://github.com/langchain-ai/deepagents/commit/bcad8dffff4d27676c87d9587cf49c038a89bf98) |
+| google-research/android_world | main | [55ddaf5edc6f](https://github.com/google-research/android_world/commit/55ddaf5edc6f6c25673aed343907d5b9dca66f84) |
 
 ---
 
@@ -456,7 +265,7 @@ Continue 是开源的 AI 代码助手，以 VS Code / JetBrains 插件形式运�
 1. **不要过早选定框架：** 先理解 Agent 架构原理，再根据需求选择框架。
 2. **评估互操作边界：** 若需要连接外部能力，比较 MCP、直接 API 与 Host 插件模型的授权、部署和运维代价。
 3. **评估可定制性：** 如果未来需要深度定制，优先选择开源框架。
-4. **考虑学习成本：** LangGraph 功能强大但学习曲线陡峭，简单场景用 OpenAI Agents SDK 更合适。
+4. **用代表任务决定抽象层：** 对比自建 Loop、SDK、完整 Harness 和状态图的接入成本；使用相同权限、模型与验收任务测量，不按品牌推断学习成本或效果。
 
 ---
 
@@ -470,7 +279,7 @@ Continue 是开源的 AI 代码助手，以 VS Code / JetBrains 插件形式运�
 | REF-4 | [OpenAI Agents SDK](https://github.com/openai/openai-agents-python) | 源码 | OpenAI Agents SDK 源码 |
 | REF-7 | [OpenAI Agents SDK Models](https://openai.github.io/openai-agents-python/models/) | 官方文档 | ModelProvider、非 OpenAI Provider 与兼容性边界 |
 | REF-8 | [OpenAI Agents SDK Agents](https://openai.github.io/openai-agents-python/agents/) | 官方文档 | Agent 与 Run 生命周期 Hooks |
-| REF-5 | [LangGraph Docs](https://langchain-ai.github.io/langgraph/) | 官方文档 | LangGraph 官方文档 |
+| REF-5 | [LangGraph Persistence](https://docs.langchain.com/oss/python/langgraph/persistence) | 官方文档 | LangGraph 官方文档 |
 | REF-6 | [Continue Docs](https://docs.continue.dev/) | 官方文档 | Continue 官方文档 |
 | REF-9 | [GitHub Copilot Agent Skills](https://docs.github.com/en/copilot/how-tos/copilot-on-github/customize-copilot/customize-cloud-agent/add-skills) | 官方文档 | Copilot Coding Agent 的 Skill 发现与使用 |
 | REF-10 | [OpenAI Agents SDK Sessions](https://openai.github.io/openai-agents-python/sessions/) | 官方文档 | Session 实现、恢复和持久化选择 |
@@ -488,7 +297,7 @@ Continue 是开源的 AI 代码助手，以 VS Code / JetBrains 插件形式运�
 ## 本章 Checklist
 
 - [ ] 理解代表性产品、SDK 与开源项目的架构设计
-- [ ] 能对比各候选方案在 8 个维度的差异
+- [ ] 能对比各候选方案在 14 个维度的差异，并对未核查项标记 Unknown
 - [ ] 理解各框架的设计哲学和适用场景
 - [ ] 掌握框架选型的评估标准
 - [ ] 能从框架设计中提取通用架构模式

@@ -171,94 +171,68 @@ from typing import Any
 
 @dataclass
 class ReActStep:
-    """ReAct 单步记录"""
-    thought: str
-    action: str = ""
+    """可观测的 Action/Observation 记录；隐藏推理不作为产品契约。"""
+    action: str
     action_input: dict = field(default_factory=dict)
     observation: str = ""
 
 
 class ReActAgent:
-    """ReAct 模式的 Agent 实现"""
+    """由可注入模型适配器驱动的最小 ReAct 控制循环。"""
 
-    def __init__(self, max_steps: int = 10):
+    def __init__(self, decide, max_steps: int = 10):
+        self.decide = decide
         self.max_steps = max_steps
         self.steps: list[ReActStep] = []
         self.tools: dict[str, Any] = {}
-        self.current_step = 0
 
     def register_tool(self, name: str, handler):
         """注册工具"""
         self.tools[name] = handler
 
-    def reason(self, task: str, context: str) -> str:
-        """推理阶段：生成 Thought"""
-        # 简化实现：根据任务类型生成推理
-        if self.current_step == 1:
-            return f"我需要完成'{task}'。首先分析任务需求。"
-
-        if "搜索" in task:
-            return f"已经获取了搜索结果，现在需要筛选最相关的信息。"
-
-        return f"第 {self.current_step} 步推理：评估当前状态，确定下一步行动。"
-
-    def act(self, thought: str, task: str) -> tuple[str, dict]:
-        """行动阶段：决定并执行 Action"""
-        # 简化实现：根据推理内容决定行动
-        if "搜索" in task and self.current_step == 1:
-            return "search", {"query": task}
-        elif "搜索" in task:
-            return "analyze", {"data": "search_results"}
-        return "reason", {"task": task}
-
     def observe(self, action: str, action_input: dict) -> str:
         """观察阶段：获取 Action 结果"""
-        if action in self.tools:
-            result = self.tools[action](**action_input)
-            return str(result)
-        return f"执行 {action} 完成"
+        if action not in self.tools:
+            raise ValueError(f"未知 Tool: {action}")
+        return str(self.tools[action](**action_input))
 
-    def should_continue(self) -> bool:
-        """判断是否继续循环"""
-        return self.current_step < self.max_steps
-
-    def run(self, task: str) -> list[ReActStep]:
+    def run(self, task: str) -> tuple[list[ReActStep], str]:
         """ReAct 主循环"""
-        context = ""
-
-        while self.should_continue():
-            self.current_step += 1
-
-            # Thought
-            thought = self.reason(task, context)
-
-            # Action
-            action, action_input = self.act(thought, task)
-
-            # Observation
-            observation = self.observe(action, action_input)
-
-            # 记录
-            step = ReActStep(
-                thought=thought,
-                action=action,
-                action_input=action_input,
-                observation=observation
+        observations: list[str] = []
+        for _ in range(self.max_steps):
+            decision = self.decide(
+                task=task,
+                observations=observations,
+                tool_names=sorted(self.tools),
             )
-            self.steps.append(step)
+            if decision.get("type") == "final":
+                return self.steps, str(decision["content"])
+            if decision.get("type") != "tool_call":
+                raise ValueError("模型决策必须是 final 或 tool_call")
 
-            # 更新上下文
-            context += f"\nThought: {thought}\nAction: {action}\nObservation: {observation}"
+            action = decision.get("name")
+            action_input = decision.get("arguments", {})
+            if not isinstance(action_input, dict):
+                raise ValueError("Tool arguments 必须是对象")
+            observation = self.observe(action, action_input)
+            observations.append(observation)
+            self.steps.append(ReActStep(action, action_input, observation))
 
-            # 判断是否完成
-            if "最终答案" in thought or self.current_step >= 3:
-                break
-
-        return self.steps
+        raise RuntimeError(f"达到最大步数限制: {self.max_steps}")
 
 
 def main():
-    agent = ReActAgent(max_steps=5)
+    # 确定性离线 Adapter 只用于演示控制契约，不冒充真实模型。
+    def scripted_decide(task, observations, tool_names):
+        if not observations:
+            return {"type": "tool_call", "name": "search",
+                    "arguments": {"query": task}}
+        if len(observations) == 1:
+            return {"type": "tool_call", "name": "analyze",
+                    "arguments": {"data": observations[-1]}}
+        return {"type": "final", "content": "已完成搜索与分析"}
+
+    agent = ReActAgent(scripted_decide, max_steps=5)
 
     # 注册模拟工具
     agent.register_tool("search", lambda query: f"搜索 '{query}' 的结果: [结果1, 结果2, 结果3]")
@@ -271,15 +245,15 @@ def main():
     task = "搜索 AI Agent 架构设计的最新资料"
     print(f"  任务: {task}\n")
 
-    steps = agent.run(task)
+    steps, final = agent.run(task)
 
     for i, step in enumerate(steps, 1):
         print(f"  Step {i}:")
-        print(f"    Thought: {step.thought}")
         print(f"    Action: {step.action}({step.action_input})")
         print(f"    Observation: {step.observation[:80]}...")
         print()
 
+    print(f"  Final: {final}")
     print("=" * 60)
 
 
@@ -287,7 +261,7 @@ if __name__ == "__main__":
     main()
 ```
 
-> **来源类型：** Fact —— 基于 ReAct 论文 (Yao et al., 2022) 的实现
+> **来源类型：** Fact + 教学实现 —— Thought/Action/Observation 的交替来自 ReAct 论文 (Yao et al., 2022)；代码使用确定性离线 Adapter 验证结构化 `tool_call` 控制契约，不是论文复现、真实模型实现或隐藏推理接口。
 
 ### 3.3 Tree of Thoughts（ToT）
 
@@ -598,6 +572,8 @@ if __name__ == "__main__":
 1. **监控执行结果：** 每个步骤完成后评估结果质量
 2. **检测偏差：** 判断结果是否偏离预期
 3. **触发重规划：** 当偏差超过阈值时，调整后续步骤
+
+上一节的 `PlanExecutor` 是 fail-stop 基线：失败后标记受阻步骤，不调用 `replan()`。下面只给出“计算受影响 DAG 并生成新 revision”的算法契约；把它接入执行循环时还必须增加重规划预算、权限复核、Capability Snapshot 比较和独立测试。不要把“定义了 `replan()`”误读成前一个执行器已经支持动态重规划。
 
 ```python
 class AdaptivePlanner(Planner):

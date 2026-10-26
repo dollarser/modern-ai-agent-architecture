@@ -1,0 +1,27 @@
+{
+  "task": "查找数据库连接配置",
+  "step_count": 2,
+  "observations": [
+    {
+      "success": true,
+      "matches": [
+        {
+          "path": "src/config.ts",
+          "snippet": "connection settings for: 查找数据库连接配置"
+        },
+        {
+          "path": "src/db.ts",
+          "snippet": "createConnection(config)"
+        }
+      ]
+    },
+    {
+      "success": true,
+      "summary": "找到 2 条候选信息，等待用户确认下一步。"
+    }
+  ],
+  "visible_lines": [
+    "plan: ['search_catalog', 'summarize_observation']",
+    "finish: steps=2, finished=True, error=None"
+  ]
+}

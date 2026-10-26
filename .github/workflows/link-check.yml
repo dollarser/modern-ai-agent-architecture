@@ -2,11 +2,22 @@ name: Link Check
 
 on:
   push:
+    branches: [main]
     paths:
       - '**/*.md'
+      - 'examples/**/*.py'
+      - 'scripts/check_code_sources.py'
+      - 'scripts/check_external_links.py'
+      - 'specs/book/link-evidence.json'
+      - '.github/workflows/link-check.yml'
   pull_request:
     paths:
       - '**/*.md'
+      - 'examples/**/*.py'
+      - 'scripts/check_code_sources.py'
+      - 'scripts/check_external_links.py'
+      - 'specs/book/link-evidence.json'
+      - '.github/workflows/link-check.yml'
   schedule:
     - cron: '0 0 * * 0'  # Weekly on Sunday
 
@@ -19,23 +30,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          node-version: '20'
-
-      - name: Install markdown-link-check
-        run: npm install -g markdown-link-check
+          python-version: '3.12'
 
       - name: Check internal links
         run: python scripts/check_internal_links.py .
 
+      - name: Check documented code sources
+        run: python scripts/check_code_sources.py .
+
       - name: Check links
         run: |
-          set -o pipefail
-          find . -name '*.md' -not -path '*/node_modules/*' -exec npx markdown-link-check {} --quiet --retry \; 2>&1 | tee link-check-results.txt
+          python scripts/check_external_links.py .
 
       - name: Upload link check results
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: link-check-results

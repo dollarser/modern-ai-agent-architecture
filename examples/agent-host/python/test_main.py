@@ -27,6 +27,7 @@ from main import (
     PolicyDecision,
     PolicyLayer,
     PolicyRequest,
+    PlanStep,
     RunState,
     ScriptedApprovalGate,
     Skill,
@@ -104,6 +105,7 @@ class DatabaseReviewAgentTest(unittest.TestCase):
                 "catalog-server.search_catalog",
             )
 
+    # docs:start checkpoint-resume-contract
     def test_checkpoint_restores_approval_without_repeating_it(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             checkpoint = Path(directory) / "cp.json"
@@ -127,6 +129,7 @@ class DatabaseReviewAgentTest(unittest.TestCase):
             self.assertTrue(second["resumed"])
             self.assertEqual(second["steps"], 6)
             self.assertEqual(len(gate.requests), 1)
+    # docs:end checkpoint-resume-contract
 
     def test_rejected_approval_never_calls_handler(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -160,7 +163,8 @@ class DatabaseReviewAgentTest(unittest.TestCase):
             events = [item["event"] for item in result["trace"]]
             self.assertIn("before_approval", events)
             self.assertIn("after_approval", events)
-            self.assertIn("on_tool_error", events)
+            self.assertIn("on_approval_rejected", events)
+            self.assertNotIn("on_tool_error", events)
 
     def test_observer_failure_isolated_but_guard_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -193,8 +197,11 @@ class DatabaseReviewAgentTest(unittest.TestCase):
                 "guard",
             )
             self.assertFalse(denied["success"])
-            self.assertIn("Guardrail", denied["error"])
+            self.assertIn("Tool 调用管线失败", denied["error"])
             self.assertEqual(denied["attempts"], 0)
+            denied_events = [item["event"] for item in denied["trace"]]
+            self.assertIn("on_tool_error", denied_events)
+            self.assertIn("after_tool", denied_events)
 
     def test_router_filters_state_and_plugin_unload_removes_tools(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -742,3 +749,365 @@ class InstalledAdapterTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SecurityPlan:
+    def __init__(self, steps):
+        self.steps = steps
+
+    async def create_plan(self, *_):
+        return self.steps
+
+    async def final_answer(self, *_):
+        return "done"
+
+
+class AgentHostSecurityTest(unittest.TestCase):
+    def host(self, checkpoint, tools, steps=None, **kwargs):
+        config = kwargs.pop("config", AgentConfig(allowed_tools=frozenset(tool.name for tool in tools)))
+        agent = AgentHost(checkpoint, config, llm=SecurityPlan(steps or [
+            PlanStep(1, "probe", tools[0].name)
+        ]), **kwargs)
+        for tool in tools:
+            agent.tools.register(tool)
+        return agent
+
+    def test_temporary_symlink_cannot_overwrite_outside_file(self):
+        from assembly import PlanStep
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = root / "workspace"
+            workspace.mkdir()
+            target = workspace / "calculator.py"
+            target.write_text("old")
+            target.chmod(0o640)
+            outside = root / "outside"
+            outside.write_text("protected")
+            (workspace / "calculator.py.tmp").symlink_to(outside)
+            agent = CodingAgent(root / "cp.json", workspace, approval=AutoApproveGate(),
+                llm=SecurityPlan([PlanStep(1, "patch", "apply_patch", {
+                    "path": "calculator.py", "old": "old", "new": "new",
+                })]))
+            result = asyncio.run(agent.run("task", "patch"))
+            self.assertTrue(result["success"])
+            self.assertEqual(outside.read_text(), "protected")
+            self.assertEqual(target.read_text(), "new")
+            self.assertEqual(target.stat().st_mode & 0o777, 0o640)
+            self.assertFalse(list(workspace.glob(".agent-write-*")))
+
+    def test_alias_cannot_bypass_canonical_deny_or_grant(self):
+        from assembly import PlanStep
+        with tempfile.TemporaryDirectory() as directory:
+            for denied, allowed in (({"action"}, {"action", "alias"}), (set(), {"alias"}), ({"alias"}, {"action"})):
+                with self.subTest(denied=denied, allowed=allowed):
+                    calls = []
+                    policy = DefaultPolicyEngine(frozenset(allowed), [PolicyLayer(ConfigScope.MANAGED, deny=frozenset(denied))])
+                    host = self.host(Path(directory) / "cp.json", [Tool("action", "action", lambda *_: calls.append(1) or {"success": True})],
+                        [PlanStep(1, "alias", "alias")], policy=policy)
+                    host.tools.register_alias("alias", "action")
+                    result = asyncio.run(host.run("task", str(denied) + str(allowed)))
+                    self.assertFalse(result["success"])
+                    self.assertEqual(calls, [])
+
+    def test_schema_constraints_rejected_before_approval_and_handler(self):
+        from assembly import PlanStep
+        with tempfile.TemporaryDirectory() as directory:
+            schema = {"type": "object", "properties": {"items": {"type": "array", "maxItems": 1,
+                "items": {"type": "object", "required": ["n"], "properties": {
+                    "n": {"type": "integer", "maximum": 10}}, "additionalProperties": False}}}}
+            for index, arguments in enumerate(({"items": [{"n": 999}]}, {"items": [{"n": True}]},
+                    {"items": [{}]}, {"items": [{"n": 1}, {"n": 2}]})):
+                calls, gate = [], ScriptedApprovalGate({"action": True})
+                host = self.host(Path(directory) / "cp.json", [Tool("action", "action", lambda *_: calls.append(1) or {"success": True},
+                    parameters=schema, requires_approval=True)], [PlanStep(1, "invalid", "action", arguments)], approval=gate)
+                self.assertFalse(asyncio.run(host.run("task", str(index)))["success"])
+                self.assertEqual(calls, [])
+                self.assertEqual(gate.requests, [])
+            from schema_validation import validate
+            for unsupported in ({"properties": {"absent": {"pattern": "x"}}}, {"maximum": "10"}):
+                with self.assertRaises(ValueError):
+                    validate(unsupported, {})
+            validate(schema, {"items": [{"n": 10}]})
+
+    def test_implementation_risk_policy_changes_and_missing_snapshot_block_resume(self):
+        from dataclasses import replace
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "cp.json"
+            original = Tool("action", "action", lambda *_: {"success": True}, requires_approval=True)
+            base = self.host(path, [original], config=AgentConfig(allowed_tools=frozenset({"action"}), interrupt_after_steps=0))
+            self.assertEqual(asyncio.run(base.run("task", "r"))["status"], "interrupted")
+            alternatives = [replace(original, handler=lambda *_: {"success": False}),
+                replace(original, implementation_version="2"), replace(original, requires_approval=False)]
+            for tool in alternatives:
+                changed = self.host(path, [tool])
+                self.assertEqual(asyncio.run(changed.run("task", "r"))["error"], "capability_snapshot_mismatch")
+            changed = self.host(path, [original], policy=DefaultPolicyEngine(frozenset({"action"}),
+                [PolicyLayer(ConfigScope.MANAGED, deny=frozenset({"action"}))]))
+            self.assertEqual(asyncio.run(changed.run("task", "r"))["error"], "capability_snapshot_mismatch")
+            state = base.checkpoints.load("r")
+            state.capability_snapshot = None
+            base.checkpoints.save(state)
+            self.assertEqual(asyncio.run(self.host(path, [original]).run("task", "r"))["error"], "capability_snapshot_mismatch")
+
+    def test_prepared_target_change_invalidates_saved_approval(self):
+        with tempfile.TemporaryDirectory() as directory:
+            calls, target = [], ["first"]
+            tool = Tool("action", "action", lambda *_: calls.append(1) or {"success": True},
+                prepare=lambda *_: {"target": target[0]}, requires_approval=True)
+            gate = ScriptedApprovalGate({"action": False})
+            host = self.host(Path(directory) / "cp.json", [tool], approval=gate)
+            asyncio.run(host.run("task", "r"))
+            state = host.checkpoints.load("r")
+            old_id = next(iter(state.approvals))
+            state.approvals[old_id] = True
+            state.results.clear()
+            state.step_count = 0
+            host.checkpoints.save(state)
+            target[0] = "second"
+            result = asyncio.run(host.run("task", "r"))
+            self.assertFalse(result["success"])
+            self.assertEqual(len(gate.requests), 2)
+            self.assertNotEqual(gate.requests[0].id, gate.requests[1].id)
+            self.assertEqual(calls, [])
+
+    def test_parallel_cancel_preserves_sibling_result_and_blocks_unknown_replay(self):
+        from assembly import PlanStep
+        async def scenario(path):
+            calls = []
+            async def write(*_):
+                calls.append(1)
+                return {"success": True}
+            async def cancel(*_):
+                await asyncio.sleep(.02)
+                raise asyncio.CancelledError()
+            host = self.host(path, [Tool("write", "write", write), Tool("cancel", "cancel", cancel)],
+                [PlanStep(1, "write", "write"), PlanStep(2, "cancel", "cancel")])
+            with self.assertRaises(asyncio.CancelledError):
+                await host.run("task", "r")
+            state = host.checkpoints.load("r")
+            self.assertTrue(state.results[1]["success"])
+            self.assertIn("2", state.executions)
+            result = await host.run("task", "r")
+            self.assertEqual(result["status"], "reconciliation_required")
+            self.assertEqual(calls, [1])
+        with tempfile.TemporaryDirectory() as directory:
+            asyncio.run(scenario(Path(directory) / "cp.json"))
+
+    def test_timeout_side_effect_is_unknown_and_never_automatically_replayed(self):
+        import time
+        async def scenario(path):
+            calls = []
+            def slow(*_):
+                time.sleep(.06)
+                calls.append(1)
+                return {"success": True}
+            host = self.host(path, [Tool("action", "slow", slow)],
+                config=AgentConfig(allowed_tools=frozenset({"action"}), step_timeout=.01))
+            result = await host.run("task", "r")
+            self.assertEqual(result["status"], "reconciliation_required")
+            self.assertTrue(result["results"][1]["outcome_unknown"])
+            await asyncio.sleep(.1)
+            resumed = await host.run("task", "r")
+            self.assertEqual(resumed["status"], "reconciliation_required")
+            self.assertEqual(calls, [1])
+        with tempfile.TemporaryDirectory() as directory:
+            asyncio.run(scenario(Path(directory) / "cp.json"))
+
+    def test_run_registry_schema_snapshot_is_independent(self):
+        from assembly import ToolRegistry
+        schema = {"properties": {"n": {"type": "integer", "maximum": 10}}}
+        registry = ToolRegistry()
+        registry.register(Tool("action", "action", lambda *_: {"success": True}, parameters=schema))
+        frozen = registry.snapshot()
+        schema["properties"]["n"]["maximum"] = 999
+        self.assertEqual(frozen.get("action").parameters["properties"]["n"]["maximum"], 10)
+
+    def test_checkpoint_and_session_ignore_precreated_temporary_symlinks(self):
+        from assembly import JsonCheckpointStore
+        from application import Session
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            outside = root / "outside"
+            outside.write_text("protected")
+            for filename in ("checkpoint.json", "session.json"):
+                (root / (filename + ".tmp")).symlink_to(outside)
+            checkpoint = JsonCheckpointStore(root / "checkpoint.json")
+            checkpoint.save(RunState("r", "task", []))
+            self.assertEqual(checkpoint.load("r").task, "task")
+            session_store = JsonSessionStore(root / "session.json")
+            session_store.save(Session("s"))
+            self.assertEqual(session_store.load("s").session_id, "s")
+            self.assertEqual(outside.read_text(), "protected")
+            self.assertFalse(list(root.glob(".agent-write-*")))
+
+    def test_parallel_async_checkpoint_saves_are_serialized(self):
+        from assembly import JsonCheckpointStore
+        class SlowStore(JsonCheckpointStore):
+            active = 0
+            peak = 0
+            async def save(self, state):
+                self.active += 1
+                self.peak = max(self.peak, self.active)
+                try:
+                    await asyncio.sleep(.001)
+                    super().save(state)
+                finally:
+                    self.active -= 1
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "cp.json"
+            store = SlowStore(path)
+            async def success(*_):
+                return {"success": True}
+            host = self.host(path, [Tool("a", "a", success), Tool("b", "b", success)],
+                [PlanStep(1, "a", "a"), PlanStep(2, "b", "b")], checkpoint_store=store)
+            self.assertTrue(asyncio.run(host.run("task", "r"))["success"])
+            self.assertEqual(store.peak, 1)
+            self.assertEqual(len(store.load("r").results), 2)
+
+
+class ReleaseReliabilityTest(unittest.TestCase):
+    host = AgentHostSecurityTest.host
+
+    def test_shared_store_same_run_executes_and_finalizes_once(self):
+        async def scenario(path):
+            calls, finals = [], []
+            async def action(*_):
+                calls.append(1)
+                await asyncio.sleep(.01)
+                return {"success": True}
+            class Planner(SecurityPlan):
+                async def final_answer(self, *_):
+                    finals.append(1)
+                    return f"answer-{len(finals)}"
+            tool = Tool("action", "action", action)
+            a, b = self.host(path, [tool]), self.host(path, [tool])
+            a.llm = b.llm = Planner([PlanStep(1, "action", "action")])
+            first, second = await asyncio.gather(a.run("task", "r"), b.run("task", "r"))
+            self.assertTrue(first["success"] and second["success"])
+            self.assertEqual(calls, [1])
+            self.assertEqual(finals, [1])
+            self.assertEqual(first["final"], second["final"])
+            self.assertTrue(second["replayed"])
+        with tempfile.TemporaryDirectory() as directory:
+            asyncio.run(scenario(Path(directory) / "cp.json"))
+
+    def test_finalization_failure_never_reexecutes_tool(self):
+        class Planner(SecurityPlan):
+            attempts = 0
+            async def final_answer(self, *_):
+                self.attempts += 1
+                if self.attempts == 1:
+                    raise RuntimeError("model unavailable")
+                return "persisted answer"
+        with tempfile.TemporaryDirectory() as directory:
+            calls = []
+            host = self.host(Path(directory) / "cp.json", [Tool("action", "action", lambda *_: calls.append(1) or {"success": True})])
+            host.llm = Planner([PlanStep(1, "action", "action")])
+            first = asyncio.run(host.run("task", "r"))
+            self.assertEqual(first["error_code"], "runtime_error")
+            self.assertTrue(asyncio.run(host.run("task", "r"))["success"])
+            self.assertEqual(asyncio.run(host.run("task", "r"))["final"], "persisted answer")
+            self.assertEqual(calls, [1])
+            self.assertEqual(host.llm.attempts, 2)
+
+    def test_message_idempotency_survives_application_restart(self):
+        async def scenario(path):
+            calls = []
+            class Agent:
+                async def run(self, task, run_id, context):
+                    calls.append((run_id, context))
+                    return {"success": True, "status": "completed", "final": "answer"}
+            app = ConversationApplication(JsonSessionStore(path), lambda *_: Agent(), max_context_messages=0)
+            a, b = await asyncio.gather(app.send("s", "hello", idempotency_key="m1"), app.send("s", "hello", idempotency_key="m1"))
+            restarted = ConversationApplication(JsonSessionStore(path), lambda *_: Agent())
+            c = await restarted.send("s", "hello", idempotency_key="m1")
+            self.assertEqual(a, b)
+            self.assertEqual(a, c)
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(calls[0][1], [])
+            with self.assertRaisesRegex(ValueError, "idempotency_key_conflict"):
+                await restarted.send("s", "changed", idempotency_key="m1")
+            self.assertEqual(len(restarted.get_session("s").messages), 2)
+        with tempfile.TemporaryDirectory() as directory:
+            asyncio.run(scenario(Path(directory) / "s.json"))
+
+    def test_cancelled_message_is_persisted_and_explicitly_resumed(self):
+        async def scenario(path):
+            runs = []
+            class Agent:
+                async def run(self, task, run_id, context):
+                    runs.append(run_id)
+                    if len(runs) == 1:
+                        raise asyncio.CancelledError()
+                    return {"success": True, "status": "completed", "final": "answer"}
+            app = ConversationApplication(JsonSessionStore(path), lambda *_: Agent())
+            with self.assertRaises(asyncio.CancelledError):
+                await app.send("s", "hello", idempotency_key="m")
+            record = app.get_session("s").tasks[0]
+            self.assertEqual(record.status, "cancelled")
+            with self.assertRaisesRegex(ValueError, "resume_required"):
+                await app.send("s", "hello", idempotency_key="m")
+            result = await app.resume("s", record.task_id)
+            self.assertEqual(result["run_id"], record.run_id)
+            self.assertEqual(runs, [record.run_id, record.run_id])
+            self.assertEqual(len(app.get_session("s").messages), 2)
+        with tempfile.TemporaryDirectory() as directory:
+            asyncio.run(scenario(Path(directory) / "s.json"))
+
+    def test_unrelated_sessions_run_concurrently(self):
+        async def scenario(path):
+            entered, both = [], asyncio.Event()
+            class Agent:
+                async def run(self, task, run_id, context):
+                    entered.append(run_id)
+                    if len(entered) == 2:
+                        both.set()
+                    await asyncio.wait_for(both.wait(), .2)
+                    return {"success": True, "status": "completed", "final": "done"}
+            app = ConversationApplication(JsonSessionStore(path), lambda *_: Agent())
+            await asyncio.gather(app.send("s1", "a"), app.send("s2", "b"))
+            self.assertEqual(len(entered), 2)
+        with tempfile.TemporaryDirectory() as directory:
+            asyncio.run(scenario(Path(directory) / "s.json"))
+
+    def test_reconciliation_blocks_live_execution_and_requires_receipt(self):
+        async def scenario(path):
+            calls = []
+            async def slow(*_):
+                await asyncio.sleep(.05)
+                calls.append(1)
+                return {"success": True}
+            host = self.host(path, [Tool("action", "slow", slow)],
+                config=AgentConfig(allowed_tools=frozenset({"action"}), step_timeout=.005))
+            self.assertEqual((await host.run("task", "r"))["error_code"], "unknown_side_effect")
+            def verified(*_):
+                return {"evidence": "test-downstream-receipt-1", "result": {"success": True, "remote_id": "1"}}
+            with self.assertRaisesRegex(RuntimeError, "execution_still_active"):
+                await host.reconcile("r", 1, verified)
+            await asyncio.sleep(.08)
+            with self.assertRaisesRegex(ValueError, "invalid_reconciliation_receipt"):
+                await host.reconcile("r", 1, lambda *_: {"result": {"success": True}})
+            state = await host.reconcile("r", 1, verified)
+            self.assertEqual(state.trace[-1]["event"], "execution_reconciled")
+            self.assertTrue((await host.run("task", "r"))["success"])
+            self.assertEqual(calls, [1])
+        with tempfile.TemporaryDirectory() as directory:
+            asyncio.run(scenario(Path(directory) / "cp.json"))
+
+    def test_error_codes_are_stable_and_completed_delivery_failure_is_replayable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "cp.json"
+            denied = self.host(path, [Tool("action", "action", lambda *_: {"success": True})],
+                policy=DefaultPolicyEngine(frozenset()))
+            self.assertEqual(asyncio.run(denied.run("task", "denied"))["error_code"], "policy_denied")
+            invalid = self.host(path, [Tool("action", "action", lambda *_: {"success": True},
+                parameters={"required": ["missing"]})])
+            self.assertEqual(asyncio.run(invalid.run("task", "invalid"))["error_code"], "invalid_arguments")
+            approval = self.host(path, [Tool("action", "action", lambda *_: {"success": True}, requires_approval=True)])
+            self.assertEqual(asyncio.run(approval.run("task", "approval"))["error_code"], "approval_denied")
+            completed = self.host(path, [Tool("action", "action", lambda *_: {"success": True})])
+            def fail(*_):
+                raise RuntimeError("delivery down")
+            completed.hooks.register("after_run", fail, kind=HookKind.GUARD)
+            self.assertTrue(asyncio.run(completed.run("task", "completed"))["success"])
+            self.assertTrue(asyncio.run(completed.run("task", "completed"))["replayed"])

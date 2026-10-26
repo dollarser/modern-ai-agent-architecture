@@ -1,6 +1,6 @@
 import unittest
 
-from main import AgentWithHooks
+from main import AgentWithHooks, HookMode
 
 
 class HooksTest(unittest.TestCase):
@@ -11,7 +11,7 @@ class HooksTest(unittest.TestCase):
             if tool_name != "read_file":
                 raise PermissionError("denied")
 
-        agent.register_custom_hook("before_tool_call", allowlist)
+        agent.register_custom_hook("before_tool_call", allowlist, HookMode.GUARD)
         self.assertIsNone(agent.run("危险任务", "delete_all"))
 
     def test_after_hook_transformation_is_returned(self) -> None:

@@ -58,7 +58,7 @@ Hook 的设计遵循以下原则：
 
 1. **非侵入性：** Hook 不修改 Agent 核心逻辑，只做拦截和增强
 2. **可组合性：** 多个 Hook 可以注册到同一个事件，按顺序执行
-3. **失败策略明确：** Guard / Before Hook 失败时应阻止操作；日志、指标等观测 Hook 失败时隔离并记录
+3. **失败策略明确：** 显式标记为 Guard 的 Hook 失败时应阻止操作；事件名中的 `before` 不决定失败策略，Observer 失败时隔离并记录
 4. **轻量级：** Hook 应该快速执行，不应阻塞主流程
 
 > **来源类型：** 作者观点 —— 基于 Claude Code Hooks 和 Web 中间件的设计模式
@@ -389,6 +389,8 @@ if __name__ == "__main__":
 
 ## 4. 常见 Hook 类型
 
+上一节的 `shared_data` 是单个教学 Agent 实例跨阶段共享的可变字典。Before Hook 的输入和修改会合并进去，所以前一个阶段的字段可能出现在后一个阶段；它不是多 Run 隔离的 Context Store，也不应存放 Secret 或作为授权事实来源。生产组装应为每次运行创建明确作用域的上下文，并通过类型化参数或返回值传递阶段数据；Hook 修改目标后仍须重新校验策略与审批绑定。
+
 ### 4.1 日志 Hook
 
 ```python
@@ -484,7 +486,7 @@ masking = create_masking_hook({
 
 1. **Hook 只做横切关注点：** 日志、监控、权限、脱敏。不要将业务逻辑放入 Hook。
 2. **Hook 快速执行：** Hook 不应阻塞主流程。耗时操作（如写数据库）应异步处理。
-3. **按类型处理失败：** Guard / Before Hook 采用 fail-closed；日志、指标等观测 Hook 失败时记录并继续。
+3. **按模式处理失败：** 显式 `GUARD` Hook 采用 fail-closed；默认 `OBSERVER` Hook 失败时记录并继续，不能从 `before_`/`after_` 事件名推断模式。
 4. **优先级排序：** 权限检查应在最前面（HIGH），日志可以放在最后（LOW）。
 5. **Hook 可配置：** 通过配置控制 Hook 的启用/禁用，方便调试和性能调优。
 6. **命名清晰：** Hook 名称应清晰表达其功能，便于调试时定位。
@@ -512,7 +514,7 @@ masking = create_masking_hook({
 
 ### Q: Before Hook 可以阻止操作执行吗？
 
-可以。Before Hook 抛出异常可以阻止操作执行。例如，权限检查 Hook 在检测到未授权的 Tool 调用时抛出 `PermissionError`，Agent 应捕获该异常并拒绝执行。
+只有注册为 `HookMode.GUARD` 的 Before Hook 才能阻止操作：Guard 抛出的异常必须向上传播并 fail-closed。默认 `OBSERVER` 的异常会被隔离和记录，不能承担权限拒绝。权限检查更推荐返回结构化 `allow / ask / deny` 决策；若本教学实现使用异常阻断，应显式注册为 Guard，并由调用方把拒绝映射为独立审计事件。
 
 ### Q: Hook 的执行顺序如何保证？
 

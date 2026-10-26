@@ -7,29 +7,36 @@ Hooks - Agent 生命周期钩子示例
 依赖：无
 """
 
+from enum import Enum
 from typing import Callable
 from dataclasses import dataclass, field
+
+
+class HookMode(Enum):
+    GUARD = "guard"
+    OBSERVER = "observer"
 
 
 @dataclass
 class HookSystem:
     """Hook 系统"""
 
-    hooks: dict[str, list[Callable]] = field(default_factory=dict)
+    hooks: dict[str, list[tuple[HookMode, Callable]]] = field(default_factory=dict)
 
-    def register(self, event: str, callback: Callable):
+    def register(self, event: str, callback: Callable,
+                 mode: HookMode = HookMode.OBSERVER):
         """注册 Hook"""
         if event not in self.hooks:
             self.hooks[event] = []
-        self.hooks[event].append(callback)
+        self.hooks[event].append((mode, callback))
 
     def trigger(self, event: str, *args, **kwargs):
         """触发 Hook"""
-        for hook in self.hooks.get(event, []):
+        for mode, hook in self.hooks.get(event, []):
             try:
                 hook(*args, **kwargs)
             except Exception as e:
-                if event.startswith("before_"):
+                if mode is HookMode.GUARD:
                     raise
                 print(f"  [Hook Error] {event}: {e}")
 
@@ -63,9 +70,10 @@ class AgentWithHooks:
         for event in self.LIFECYCLE_EVENTS:
             self.hooks.register(event, log_hook(event))
 
-    def register_custom_hook(self, event: str, callback: Callable):
+    def register_custom_hook(self, event: str, callback: Callable,
+                             mode: HookMode = HookMode.OBSERVER):
         """注册自定义 Hook"""
-        self.hooks.register(event, callback)
+        self.hooks.register(event, callback, mode)
 
     def run(self, task: str = "demo",
             tool_name: str = "search_web") -> dict | None:
@@ -105,7 +113,9 @@ def main():
             raise PermissionError(f"拒绝 Tool: {tool_name}")
         print(f"  [PERMISSION] ✅ 允许 Tool: {tool_name}")
 
-    agent.register_custom_hook("before_tool_call", permission_check)
+    agent.register_custom_hook(
+        "before_tool_call", permission_check, HookMode.GUARD
+    )
 
     def mask_secret(_tool_name: str, result: dict):
         result["content"] = result["content"].replace("sk-demo", "sk-***")

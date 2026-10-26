@@ -138,7 +138,7 @@ graph TD
     Orchestrator --> Subagents[Subagents<br/>独立上下文与预算]
 ```
 
-> **图 2-5：** 从静态配置到单 Agent 执行，再到多 Agent 编排的职责边界。图中是工程抽象，不代表任一产品的内部实现。
+> **图 2-2：** 从静态配置到单 Agent 执行，再到多 Agent 编排的职责边界。图中是工程抽象，不代表任一产品的内部实现。
 
 | 术语 | 本书中的工作定义 | 不应误解为 |
 |------|------------------|-------------|
@@ -217,7 +217,7 @@ flowchart TB
     Distribution -.可选提供.-> Protocols
 ```
 
-> **图 2-6：** 五类正交概念及其关系。`AgentHost` 是宿主，不是运行主体；Expert Profile 是配置，不是另一种执行层；MCP 是协议，Connector 是具体产品集成，Plugin 是分发和生命周期边界。
+> **图 2-3：** 五类正交概念及其关系。`AgentHost` 是宿主，不是运行主体；Expert Profile 是配置，不是另一种执行层；MCP 是协议，Connector 是具体产品集成，Plugin 是分发和生命周期边界。
 
 关键边界如下：
 
@@ -276,7 +276,7 @@ flowchart TB
     Tool -->|任务结束或撤销| Unload["卸载 / 撤销"]
 ```
 
-> **图 2-7：** 扩展从发现、验证、安装、启用、加载、授权到执行/卸载的教学边界。Skill 中即使附带脚本，也只能要求 Agent 经 Runtime 暴露的文件、命令或专用 Tool 执行；Skill Loader 不直接运行脚本。
+> **图 2-4：** 扩展从发现、验证、安装、启用、加载、授权到执行/卸载的教学边界。Skill 中即使附带脚本，也只能要求 Agent 经 Runtime 暴露的文件、命令或专用 Tool 执行；Skill Loader 不直接运行脚本。
 
 | 阶段 | 主要对象 | 必须回答的治理问题 |
 |------|----------|--------------------|
@@ -307,7 +307,7 @@ flowchart TB
     SubRun --> Trace
 ```
 
-> **图 2-8：** 交互、目标、执行、恢复和观测对象的身份关系。一个 Session 可承载多个 Task/Run；一次 Run 可产生多个 Checkpoint 和子 Run，并共同进入 Trace。
+> **图 2-5：** 交互、目标、执行、恢复和观测对象的身份关系。一个 Session 可承载多个 Task/Run；一次 Run 可产生多个 Checkpoint 和子 Run，并共同进入 Trace。
 
 | 对象 | 身份与生命周期 | 不应混同 |
 |------|----------------|----------|
@@ -331,7 +331,7 @@ flowchart TB
 | `Session` | Host 或应用 | 用户、租户或设备的一组交互 | active / idle / expired | 不能直接恢复执行，只能提供共享上下文 |
 | `Task` | Host 或业务系统 | 一个业务目标 | open / canceled / retried / resolved | 通过新的或已有 Run 继续 |
 | `Run` | Runtime | Task 的一次执行尝试 | created / running / waiting / completed / failed / canceled | 可以从兼容 Checkpoint 恢复 |
-| A2A `Task` | A2A Server | 跨 Agent 的协议任务 | submitted / working / input-required / completed / failed / canceled | 由协议操作继续、查询或取消；不等同于本地 Run |
+| A2A `Task` | A2A Server | 跨 Agent 的协议任务 | submitted / working / input-required / auth-required / completed / failed / canceled / rejected | 由协议操作继续、查询或取消；不等同于本地 Run |
 
 关系可以简化为：
 
@@ -370,7 +370,7 @@ Agent Run ──跨系统委派──> A2A Task
 | Prompt Engineering | 单次任务、示例与输出契约 | 第 3 章 | 只靠措辞解决权限和事实问题 |
 | Context Engineering | 模型可见的 Instructions、Skill、Memory、证据、Schema 与预算 | 第 3、4、8、12 章 | 把所有信息塞进长窗口 |
 | Tool Engineering | Tool Schema、Handler、Observation、副作用和幂等 | 第 6、11、13 章 | Function Calling 自动执行函数 |
-| Workflow Engineering | DAG、状态机、确定性业务步骤与补偿 | 第 5、15 章 | 每个 Workflow 都必须由 Agent 决策 |
+| Workflow Engineering | DAG、状态机、确定性业务步骤与补偿 | 第 5、9、15、16 章 | 每个 Workflow 都必须由 Agent 决策 |
 | Harness Engineering | 单次 Run 的 Runtime、工作区、Tool、Policy、Sandbox、反馈和恢复 | 第 9～11、16～17 章 | Agent Host 产品组件的同义词 |
 | Loop Engineering | 跨 Run 的 Trigger、Dispatch、Verifier、State、Budget、Stop 与 Human Gate | 第 9、16～18 章 | Agent 内部 `while` 循环或无限自治 |
 | Agentic Engineering | 上述实践与评估、安全、部署、运维的系统组合 | 全书，重点第 16～18 章 | 一项位于演进链末端的新组件 |
@@ -425,7 +425,7 @@ flowchart TD
     Verify -->|Failed| Abort
 ```
 
-> **图 2-2：** Agent Run 的决策与执行边界。`Planning` 是 Decision 的一种策略，不是所有任务的必经阶段；Tool 必须先经过 Schema、Policy、Approval 和 Runtime 才能产生外部副作用。
+> **图 2-6：** Agent Run 的决策与执行边界。`Planning` 是 Decision 的一种策略，不是所有任务的必经阶段；Tool 必须先经过 Schema、Policy、Approval 和 Runtime 才能产生外部副作用。
 
 ### 3.2 主循环各阶段详解
 
@@ -495,8 +495,7 @@ stateDiagram-v2
     WaitingApproval --> Canceled: 拒绝 / 取消
     Running --> WaitingInput: 需要用户输入
     WaitingInput --> Running: 收到输入
-    Running --> Checkpoint: 保存状态
-    Checkpoint --> Running: 继续决策
+    Running --> Running: 保存 Checkpoint 后继续决策
     Running --> Completed: 验证通过
     Running --> Failed: 不可恢复错误
     Running --> Canceled: 超时 / 用户取消
@@ -506,7 +505,7 @@ stateDiagram-v2
 
 ```
 
-> **图 2-3：** 一次 Agent Run 的教学状态机。重点是等待、恢复、验证、失败和取消；`Reasoning`、`Planning`、Tool 执行等属于 `Running` 内部事件。
+> **图 2-7：** 一次 Agent Run 的教学状态机。重点是等待、恢复、验证、失败和取消；`Reasoning`、`Planning`、Tool 执行等属于 `Running` 内部事件。
 
 ### 4.2 生命周期各阶段详解
 
@@ -658,7 +657,7 @@ sequenceDiagram
     end
 ```
 
-> **图 2-4：** 组件交互教学时序图。展示一种包含可选 Planning、Policy/Approval、Checkpoint 和 Verifier 的典型顺序；真实框架可能使用 Middleware、Graph、Turn 或 Event 表达同样边界。
+> **图 2-8：** 组件交互教学时序图。展示一种包含可选 Planning、Policy/Approval、Checkpoint 和 Verifier 的典型顺序；真实框架可能使用 Middleware、Graph、Turn 或 Event 表达同样边界。
 
 ---
 
@@ -908,19 +907,19 @@ if __name__ == "__main__":
 [Read] 接收 Prompt: 搜索今天的天气
 [Reasoning] 需要调用搜索工具获取信息
 [Planning] 制定 4 步执行计划
+[Reasoning] 需要调用搜索工具获取信息
+[Planning] 制定 4 步执行计划
 执行完成: Step 1: 确定所需工具
 执行完成: Step 2: 调用工具执行
 执行完成: Step 3: 检查执行结果
 执行完成: Step 4: 评估任务完成度
-[Reasoning] 需要调用搜索工具获取信息
-[Planning] 制定 4 步执行计划
 执行完成: Step 1: 确定所需工具
 ==================================================
 最终状态: AgentState.FINISH
 执行步数: 5
 ```
 
-> **运行方式：** 本章代码为架构演示的简化实现，完整可运行版本见 `examples/hello-agent/python/main.py`
+> **代码性质：** 本章代码是可独立复制运行的架构演示；`examples/hello-agent/` 只对应第 1 章的更小闭环，不是这段实现的完整版本。
 
 ---
 
@@ -980,7 +979,7 @@ Agent 主循环可以实现为 ReAct 的工程化扩展，但不应固定为 Rea
 | REF-1 | [ReAct Paper](https://arxiv.org/abs/2210.03629) (Yao et al., 2022) | 论文 | Agent 循环的基础范式 |
 | REF-2 | [OpenAI Agents SDK](https://github.com/openai/openai-agents-python) | 源码 | Agent Runtime 的参考实现 |
 | REF-3 | [Anthropic Claude Code Architecture](https://docs.anthropic.com/en/docs/claude-code) | 官方文档 | Claude Code 的架构设计 |
-| REF-4 | [LangGraph Documentation](https://langchain-ai.github.io/langgraph/) | 官方文档 | 图状态机在 Agent 中的应用 |
+| REF-4 | [LangGraph Documentation](https://docs.langchain.com/oss/python/langgraph/overview) | 官方文档 | 图状态机在 Agent 中的应用 |
 | REF-5 | [Google ADK](https://adk.dev/) | 开源框架 | Agent、Session、Memory、MCP、A2A 和多语言开发 |
 | REF-6 | [Pydantic AI](https://github.com/pydantic/pydantic-ai) | 开源框架 | 类型安全、依赖注入、评估与可观测性 |
 | REF-7 | [OpenHands](https://github.com/OpenHands/OpenHands) | 开源项目 | Agent Server、工作区、沙箱和自动化 |

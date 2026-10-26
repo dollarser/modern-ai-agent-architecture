@@ -100,14 +100,29 @@ stateDiagram-v2
     Authorized --> Executing: 执行贡献项
     Executing --> Loaded: 本次调用结束
     Loaded --> Enabled: 运行结束
-    Enabled --> Unloaded: 卸载
+    Enabled --> Removed: Installer 删除安装包
     Enabled --> Revoked: 禁用/撤销
     Loaded --> Revoked: 运行中撤销
     Revoked --> [*]
-    Unloaded --> [*]
+    Removed --> [*]
 ```
 
-> **图 14-2：** Plugin 统一生命周期教学子图。它展开从发现、验证到卸载/撤销的状态变化，不表示已覆盖生产供应链和运行隔离。
+> **图 14-2：** Plugin 跨层生命周期教学子图。`Discovered / Verified / Installed / Enabled / Removed` 是 Installer 与安装包层的概念，`Authorized / Executing` 是单次运行的控制状态；它们不是下文 `PluginState` 枚举。Installer 删除安装包后进入终态 `Removed`，而 Runtime Manager 的 `unload()` 只移除本次加载的贡献并保留注册。两种“卸载”作用域不能混用。本图不表示已覆盖生产供应链和运行隔离。
+
+下文教学实现只持久化 Runtime Manager 自己拥有的四个状态，其转换与枚举逐项对应：
+
+```mermaid
+stateDiagram-v2
+    [*] --> REGISTERED: register
+    REGISTERED --> LOADED: load
+    LOADED --> ACTIVE: activate
+    ACTIVE --> DISABLED: deactivate
+    LOADED --> REGISTERED: unload
+    ACTIVE --> REGISTERED: unload（先 deactivate）
+    DISABLED --> REGISTERED: unload
+```
+
+> **图 14-3：** Runtime `PluginState` 状态机。`DISABLED` 后若要重新激活，必须先 `unload` 回到 `REGISTERED`，再重新执行 `load → activate`；教学实现没有声明不存在的直接恢复路径。
 
 ### 2.3 可选能力与打包边界
 
@@ -162,7 +177,6 @@ class PluginState(Enum):
     LOADED = "loaded"
     ACTIVE = "active"
     DISABLED = "disabled"
-    ERROR = "error"
 
 
 @dataclass
@@ -187,6 +201,7 @@ class Plugin:
     # Plugin 提供的能力
     tools: dict[str, Any] = field(default_factory=dict)
     skills: list[Any] = field(default_factory=list)
+    hooks: list[Any] = field(default_factory=list)
     config: dict = field(default_factory=dict)
 
     # 生命周期回调
@@ -286,8 +301,10 @@ class PluginRegistry:
         self._active_plugins.discard(name)
 
     def unload(self, name: str):
-        """卸载 Plugin"""
+        """移除 Runtime 贡献并保留注册；不是 Installer 删除安装包。"""
         plugin = self._get_plugin(name)
+        if plugin.state == PluginState.REGISTERED:
+            return
         if plugin.state == PluginState.ACTIVE:
             self.deactivate(name)
 
@@ -302,6 +319,7 @@ class PluginRegistry:
             plugin = self._plugins[name]
             for tool_name, tool in plugin.tools.items():
                 if tool_name in tools:
+                    # 激活阶段已阻止冲突；这里只是防御性不变量断言。
                     raise RuntimeError(
                         f"内部错误：激活 Plugin 存在 Tool 冲突: {tool_name}"
                     )
@@ -438,7 +456,7 @@ Python/TypeScript 教学实现和契约测试位于 `examples/plugin-manager/`�
 
 ### 4.1 权限系统
 
-Plugin 必须在 Manifest 中声明所需权限，Agent 在激活时检查：
+Plugin 必须在 Manifest 中声明所需权限，Host 在安装/加载时预检，并在能力调用边界重新校验：
 
 ```python
 @dataclass
@@ -469,7 +487,7 @@ class PermissionChecker:
         return [p for p in permissions if p not in self.allowed]
 ```
 
-Manifest 中的 `permissions` 只是请求，不是授权。Host 必须将请求与部署策略、用户同意或管理员策略求交集，并在执行能力之前强制检查。上面的 Registry 在 `load()` 时拒绝未授权权限；真实系统还应在 Tool 调用边界再次校验，避免加载后的配置变化或绕过。
+Manifest 中的 `permissions` 只是请求，不是授权。Host 必须将请求与部署策略、用户同意或管理员策略求交集，并在执行能力之前强制检查。上面的 `PermissionChecker` 只演示安装/加载预检的二元 allowlist：缺失权限直接拒绝；它没有实现第 16 章完整的 `allow / ask / deny`。需要交互审批时，Policy 返回 `ask`，Approval 只处理该分支。真实系统还应在 Tool 调用边界再次校验，避免加载后的配置变化或绕过。
 
 生命周期状态采用“回调成功后提交”：回调抛错时 Registry 状态保持在转换前。这个原子性只覆盖 Registry 内部状态；回调若修改外部系统，仍需由 Plugin 自己提供幂等键、补偿操作或事务边界。
 
@@ -485,7 +503,7 @@ Manifest 中的 `permissions` 只是请求，不是授权。Host 必须将请求
 
 ## 5. 最佳实践
 
-1. **Plugin 声明权限：** 每个 Plugin 必须声明所需权限，Agent 在激活时检查。
+1. **Plugin 声明权限：** 每个 Plugin 必须声明所需权限；Host 在安装/加载时预检，在每次能力调用前按当前主体与策略重新校验。
 2. **依赖管理：** Plugin 的依赖应该在 Manifest 中显式声明，加载时检查。
 3. **版本兼容性：** Plugin 声明兼容的 Agent 版本范围，避免不兼容的加载。
 4. **优雅降级：** Plugin 出错时不应影响 Agent 核心功能，应支持禁用和重启。
@@ -520,7 +538,13 @@ Plugin 是 Host 可安装、启用和隔离的扩展单元，可以打包 Tool�
 
 ### Q: Plugin 之间如何通信？
 
-Plugin 通过 Event Bus 间接通信，不应直接互相调用。一个 Plugin 发布事件，其他 Plugin 订阅感兴趣的事件。Plugin Registry 负责管理 Plugin 间的依赖关系。
+按交互语义选择机制，不能把 Event Bus 当成唯一通道：
+
+- 需要稳定请求/响应或返回值时，通过 Manifest 声明依赖，并依赖 Host 提供的 Service/Port 接口；
+- 无返回值的状态通知使用 Event Bus，订阅者失败按 Observer 语义隔离；
+- 需要拦截、修改或拒绝操作时使用同步 Hook/Middleware，安全 Guard 必须 fail-closed。
+
+应避免绕过 Host 生命周期和权限边界的任意直接调用；具体 Service、Event 与 Hook 契约由 Host 定义，并不要求所有插件体系采用同一种依赖注入框架。
 
 ### Q: 什么时候应该用 Plugin 而不是直接修改代码？
 
@@ -533,7 +557,7 @@ Plugin 通过 Event Bus 间接通信，不应直接互相调用。一个 Plugin 
 | 编号 | 来源 | 类型 | 说明 |
 |------|------|------|------|
 | REF-1 | [VS Code Extension API](https://code.visualstudio.com/api) | 官方文档 | Plugin 系统的经典参考 |
-| REF-2 | [OpenAI Plugins (Archived)](https://platform.openai.com/docs/plugins) | 官方文档 | 早期的 Agent Plugin 尝试 |
+| REF-2 | [OpenAI MCP Servers](https://developers.openai.com/api/docs/guides/tools-connectors-mcp) | 官方文档 | 外部能力的 MCP 接入参考 |
 | REF-3 | [Chrome Extension Manifest](https://developer.chrome.com/docs/extensions/mv3/manifest/) | 官方文档 | Manifest 设计参考 |
 | REF-4 | [OpenClaw Tools and Plugins](https://github.com/openclaw/openclaw/blob/main/docs/tools/index.md) | 开源仓库文档 | Tool、Skill、Plugin 的分层与运行期能力过滤 |
 | REF-5 | [Codex Plugin Structure](https://developers.openai.com/codex/plugins/build#plugin-structure) | 官方文档 | Plugin 打包 Skills、MCP、Apps、Hooks 与资源的产品实例 |

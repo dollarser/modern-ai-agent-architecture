@@ -137,29 +137,47 @@ class ConfigLoader:
 
 单元测试应针对稳定契约，而不是复制某一章已经淘汰的组合类。第 7 章最小示例使用标准库 `unittest`，测试直接导入同目录的真实实现：
 
+<!-- code-source: examples/agent-mvp-minimal/python/test_main.py#agent-mvp-contract-tests -->
 ```python
-import unittest
-
-from main import MinimalAgent, TaskState, ToolCall, ToolDispatcher
-
-
 class MinimalAgentTest(unittest.TestCase):
-    def test_success_contract(self):
-        state = MinimalAgent().run("查找数据库连接配置")
+    def test_completes_the_two_tool_plan(self) -> None:
+        expected = json.loads(
+            (Path(__file__).with_name("expected_transcript.json")).read_text()
+        )
+        output = io.StringIO()
+        with redirect_stdout(output):
+            state = MinimalAgent().run(expected["task"])
+
         self.assertTrue(state.finished)
         self.assertIsNone(state.error)
-        self.assertEqual(state.step_count, 2)
+        self.assertEqual(state.step_count, expected["step_count"])
+        self.assertEqual(state.observations, expected["observations"])
+        for visible_line in expected["visible_lines"]:
+            self.assertIn(visible_line, output.getvalue())
 
-    def test_limit_is_not_success(self):
+    def test_step_limit_is_not_reported_as_success(self) -> None:
         state = MinimalAgent(max_steps=1).run("查找数据库连接配置")
+
         self.assertFalse(state.finished)
         self.assertEqual(state.error, "达到最大步数: 1")
+        self.assertEqual(state.step_count, 1)
 
-    def test_unknown_tool_is_structured_failure(self):
+    def test_unknown_tool_returns_structured_failure(self) -> None:
         result = ToolDispatcher().execute(
             ToolCall("missing_tool", {}), TaskState(task="test")
         )
-        self.assertFalse(result["ok"])
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["error_code"], "tool_not_found")
+        self.assertIn("unknown tool", result["error_message"])
+        self.assertFalse(result["retryable"])
+
+    def test_instructions_participate_in_reasoning(self) -> None:
+        agent = MinimalAgent(instructions="始终输出可核查的文件路径")
+
+        reason = agent.planner.reason("查找配置", agent.instructions)
+
+        self.assertIn("始终输出可核查的文件路径", reason)
 ```
 
 对应的唯一事实来源是 `examples/agent-mvp-minimal/python/test_main.py`。Memory、Hooks 和 Tool Registry 应分别测试各章定义的接口，不要为了测试方便重新创造一个同时拥有所有组件的旧版 `AgentMVP`。
@@ -168,37 +186,34 @@ class MinimalAgentTest(unittest.TestCase):
 
 集成测试关注跨组件契约和状态迁移。第 16 章可运行示例覆盖中断后由新实例恢复，以及重试耗尽不得误报成功：
 
+<!-- code-source: examples/agent-host/python/test_main.py#checkpoint-resume-contract -->
 ```python
-import asyncio
-import tempfile
-from pathlib import Path
+    def test_checkpoint_restores_approval_without_repeating_it(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            checkpoint = Path(directory) / "cp.json"
+            gate = ScriptedApprovalGate({"propose_change": True})
+            task = "查找数据库配置并给出变更建议"
+            first = self.run_agent(
+                DatabaseReviewAgent(
+                    checkpoint,
+                    AgentConfig(interrupt_after_steps=4),
+                    approval=gate,
+                ),
+                task,
+                "resume",
+            )
+            second = self.run_agent(
+                DatabaseReviewAgent(checkpoint, approval=gate), task, "resume"
+            )
 
-from main import AgentConfig, AutoApproveGate, DatabaseReviewAgent
-
-
-def test_checkpoint_resume():
-    with tempfile.TemporaryDirectory() as directory:
-        checkpoint = Path(directory) / "cp.json"
-        task = "查找数据库配置"
-
-        first = asyncio.run(DatabaseReviewAgent(
-            checkpoint,
-            AgentConfig(interrupt_after_steps=1),
-            approval=AutoApproveGate(),
-        ).run(task, "session-1"))
-        second = asyncio.run(
-            DatabaseReviewAgent(
-                checkpoint,
-                approval=AutoApproveGate(),
-            ).run(task, "session-1")
-        )
-
-        assert first["status"] == "interrupted"
-        assert second["success"] is True
-        assert second["resumed"] is True
+            self.assertEqual(first["status"], "interrupted")
+            self.assertTrue(second["success"])
+            self.assertTrue(second["resumed"])
+            self.assertEqual(second["steps"], 6)
+            self.assertEqual(len(gate.requests), 1)
 ```
 
-这里显式注入 `AutoApproveGate` 仅用于确定性的测试环境。第 16 章的生产安全默认值是拒绝高风险操作；生产代码应替换为真实审批实现，不能复制测试门禁。
+这里显式注入 `ScriptedApprovalGate` 仅用于确定性的测试环境，并额外断言恢复不会重复审批。第 16 章的生产安全默认值是拒绝高风险操作；生产代码应替换为真实审批实现，不能复制测试门禁。
 
 对应的完整测试位于 `examples/agent-host/python/test_main.py` 和 `examples/agent-host/typescript/test.ts`。测试层次建议如下：
 
@@ -207,7 +222,10 @@ def test_checkpoint_resume():
 | Unit | Adapter、Planner、Tool、Policy、序列化器 | schema、纯函数结果、拒绝规则、错误映射 |
 | Integration | Runtime + Registry + Checkpoint Store | 状态迁移、恢复位置、依赖顺序、幂等键 |
 | Extension integration | Skill/Plugin Installer + MCP Manager + Runtime | 原子安装、配置恢复、启动注册、禁用/卸载清理、失败回滚 |
+| Keyless transcript replay | 确定性 Adapter + 录制的完整交互夹具 | 无 API Key 回放消息、Tool 轨迹、Observation 与用户可见输出；行为变更必须同提交更新夹具并审查差异 |
 | E2E | 固定模型版本 + 沙箱 + 测试外部系统 | 最终结果、轨迹约束、权限、成本与延迟预算 |
+
+`examples/agent-mvp-minimal/python/expected_transcript.json` 提供最小 keyless transcript fixture：测试不调用真实模型，仍同时断言 Tool Observation 和用户可见输出。Fixture 不是把开放性回答冻结成脆弱的逐字快照；应优先保存结构化事件、错误码和必要可见行。真实模型 E2E 在无 Key 时可以显式跳过，但 keyless 契约层不能跳过。
 
 运行仓库中的真实契约测试：
 
@@ -299,6 +317,21 @@ class PermissionSystem:
 
 Authentication 证明“是谁”，Authorization 判断“该身份是否可访问资源”，Policy 将身份、主体、参数、环境和风险组合成 `allow/ask/deny`，Approval 只处理 `ask` 的决定。Agent 使用用户授权不表示 Agent 就是用户；Subagent 也不得自动继承父 Run 的全部 Credential、Tool 或网络范围。
 
+`CredentialRef` 应是一等配置类型，而不是普通字符串约定：
+
+```python
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class CredentialRef:
+    provider: str       # 例如 vault / keychain / workload_identity
+    name: str           # 非 Secret 的逻辑名称
+    version: str | None = None
+```
+
+配置、Session、Checkpoint、Trace 和 Artifact 只允许保存 `CredentialRef`，不保存解析后的值。Credential Resolver 在 Tool 执行边界按主体、Scope、过期时间和目标资源解析短期值，并确保日志 redaction 在任何外发遥测之前执行。引用本身也可能暴露系统结构，应纳入最小披露和租户隔离。
+
 ### 3.3 沙箱执行
 
 ```python
@@ -380,7 +413,7 @@ flowchart TB
     Output --> Audit["Trace / Audit"]
 ```
 
-> **图 17-2：** 生产安全控制的唯一职责链。第 10 章只说明 Hook 如何挂载 Guard/Observer，第 18 章只保留检查清单；Hook 是挂载机制，不天然是安全控制，Sandbox 也不能被上层批准关闭。
+> **图 17-1：** 生产安全控制的唯一职责链。第 10 章只说明 Hook 如何挂载 Guard/Observer，第 18 章只保留检查清单；Hook 是挂载机制，不天然是安全控制，Sandbox 也不能被上层批准关闭。
 
 | 概念 | 回答的问题 | 失败语义 |
 |------|------------|----------|
@@ -457,7 +490,7 @@ graph TD
     N -->|是| P["✅ 发布完成"]
 ```
 
-> **图 17-1：** CI/CD 流水线全景。构建、测试和安全扫描失败会阻止发布；生产流量只在 Staging、冒烟测试和 Canary 健康检查通过后逐步放开。
+> **图 17-2：** CI/CD 流水线全景。构建、测试和安全扫描失败会阻止发布；生产流量只在 Staging、冒烟测试和 Canary 健康检查通过后逐步放开。
 
 ### 4.1 Docker 部署
 
@@ -590,6 +623,27 @@ volumes:
 
 ---
 
+### 4.3 移动端与 GUI Agent：平台能力是运行前置条件
+
+服务端容器中的成功不能直接证明手机端可靠。设备 Agent 除了模型与 Tool，还依赖前台应用、窗口、屏幕尺寸、锁屏状态和系统授予的操作能力。Android 官方明确限制后台启动前台服务；不能把“注册了任务”写成“到时必然持续执行”。适用规则须按目标 API 和服务类型复核。[Android 前台服务限制](https://developer.android.com/develop/background-work/services/fgs/restrictions-bg-start)
+
+本节以 Helix 一类移动端 Host 为适用场景，提供设计建议，不宣称已完成其设备实现或真机验证。
+
+| 边界 | Host 应记录 / 检查什么 | 失效后的行为 |
+|------|------------------------|--------------|
+| 能力 | Accessibility、Shizuku、Root 或其他 Backend 的实际可用性与修订 | 缺少能力时暂停或拒绝，不能静默切换更高权限实现 |
+| 观测 | `observation_id`、采集时间、目标包名、窗口 / 显示标识、尺寸与产物引用 | 页面或屏幕状态变化后重新观测，旧坐标失效 |
+| 动作 | 关联的观测、目标元素 / 坐标、前置条件与风险 | 点击前重验目标；防止权限弹窗或窗口切换改变点击对象 |
+| 结果 | 动作后业务状态，而非仅注入事件的返回值 | 输入成功不等于业务提交成功；未知结果进入核对流程 |
+| 进程 | 持久化调用意图、回执、预算与待审事项 | 重启先恢复事实，不能因 Worker 重试重复点击或发送 |
+| 数据 | 截图中的账号、通知、键盘输入等敏感内容 | 分别控制上传、脱敏、访问和保留，不默认进入长期记忆 |
+
+推荐闭环为 `observe → propose → validate → authorize → act → verify`。对只读动作可以合并部分步骤，对提交、删除和发送等动作应保留明确的目标核对。Shizuku / Root 的高权限不替代应用业务授权，也不意味着所有 Tool 都可使用该能力。
+
+**验收条件：** 至少覆盖锁屏、权限撤销、目标应用切换、截图过期、进程退出、断网、动作已提交但回执丢失。每类测试都应记录失败前后的状态和副作用数量，而非只统计 Agent 是否输出“完成”。可借鉴 [AndroidWorld](https://github.com/google-research/android_world) 的任务初始化与状态验证方式；模拟器结果和真实设备结果分开报告。
+
+**Trade-off：** 每步重新观测增加延迟与图像 Token；可用只读状态检查或窗口版本减少成本，但不能省掉关键提交前后的验证。目标 UI 没有稳定元素或业务查询接口时，需显式接受较弱的可验证性，而不是把像素匹配当成事务保证。
+
 ## 5. 监控与可观测性
 
 ### 5.1 关键指标
@@ -611,22 +665,37 @@ volumes:
 import structlog
 
 logger = structlog.get_logger()
+SENSITIVE_KEYS = {"authorization", "api_key", "password", "secret", "token"}
+
+
+def redact(value, key: str = ""):
+    """字段级脱敏；真实系统还应覆盖嵌套对象、别名和组织策略。"""
+    if key.lower() in SENSITIVE_KEYS:
+        return "[REDACTED]"
+    if isinstance(value, dict):
+        return {k: redact(v, k) for k, v in value.items()}
+    if isinstance(value, list):
+        return [redact(item) for item in value]
+    return value
 
 class StructuredLogger:
     """结构化日志"""
 
     @staticmethod
     def log_agent_start(run_id: str, task: str):
-        logger.info("agent_start", run_id=run_id, task=task[:200])
+        # 默认不记录原始用户任务；需要内容诊断时应走受控、脱敏的本地 Trace。
+        logger.info("agent_start", run_id=run_id, task_chars=len(task))
 
     @staticmethod
     def log_tool_call(run_id: str, tool: str, args: dict, duration: float):
         logger.info("tool_call", run_id=run_id, tool=tool,
-                     args_summary=str(args)[:200], duration_ms=duration * 1000)
+                    args=redact(args), duration_ms=duration * 1000)
 
     @staticmethod
-    def log_tool_error(run_id: str, tool: str, error: str):
-        logger.error("tool_error", run_id=run_id, tool=tool, error=error)
+    def log_tool_error(run_id: str, tool: str, error_code: str):
+        # 原始异常可能包含路径、请求体或凭据，不直接进入外发日志。
+        logger.error("tool_error", run_id=run_id, tool=tool,
+                     error_code=error_code)
 
     @staticmethod
     def log_agent_finish(run_id: str, success: bool, steps: int, duration: float):
@@ -660,22 +729,24 @@ class TokenTracker:
 
     def __init__(self, budget: int = 1000000):
         self.budget = budget
-        self.used = 0
+        self.input_used = 0
+        self.output_used = 0
         self.calls = 0
 
     def record(self, prompt_tokens: int, completion_tokens: int):
-        self.used += prompt_tokens + completion_tokens
+        self.input_used += prompt_tokens
+        self.output_used += completion_tokens
         self.calls += 1
 
     def remaining(self) -> int:
-        return max(0, self.budget - self.used)
+        return max(0, self.budget - self.input_used - self.output_used)
 
     def is_over_budget(self) -> bool:
-        return self.used >= self.budget
+        return self.input_used + self.output_used >= self.budget
 
-    def cost_estimate(self, price_per_token: float) -> float:
-        """价格由当前模型与区域的计费元数据传入，不在代码中硬编码。"""
-        return self.used * price_per_token
+    def cost_estimate(self, input_price: float, output_price: float) -> float:
+        """输入/输出单价由模型、区域和计费版本元数据传入。"""
+        return self.input_used * input_price + self.output_used * output_price
 ```
 
 ---

@@ -55,7 +55,7 @@
 | Tool 描述精准 | 描述是模型选择的重要依据；同时以 schema、候选集和执行前授权约束实际调用 | 第6章 |
 | 按复杂度管理 Tool | 多来源、动态启停或需审计时使用 Registry；少量静态 Tool 可显式声明 | 第 11 章 |
 | 返回结构化结果 | 所有 Tool 返回统一格式，包含 success 字段 | 第6章 |
-| 参数严格校验 | 在 Handler 中校验所有参数，不依赖模型输出 | 第6章 |
+| 参数严格校验 | Handler 前统一校验 Schema；Handler 再校验业务前置条件，不依赖模型输出 | 第6章 |
 | 速率限制 | 对高频 Tool 设置速率限制，保护下游服务 | 第 11 章 |
 
 ### 1.4 Memory
@@ -69,13 +69,13 @@
 
 ### 1.5 Hooks
 
-本节只保留实践清单：Hook 的事件、顺序和失败模式以第 10 章为准；Guardrail、Policy、Approval 和 Sandbox 的生产控制链以第 17 章图 17-2 为准。
+本节只保留实践清单：Hook 的事件、顺序和失败模式以第 10 章为准；Guardrail、Policy、Approval 和 Sandbox 的生产控制链以第 17 章图 17-1 为准。
 
 | 实践 | 说明 | 参考章节 |
 |------|------|---------|
 | 只做横切关注点 | 日志、监控、权限、脱敏，不包含业务逻辑 | 第 10 章 |
 | 快速执行 | Hook 不应阻塞主流程，耗时操作异步化 | 第 10 章 |
-| 失败语义分类 | Guard 失败阻断操作；Observer 失败隔离并告警；Transformation 按契约回滚或拒绝 | 第 10、17 章 |
+| 失败语义分类 | Guard 失败阻断操作；Observer 失败隔离并告警；需要修改结果时使用显式、可校验的中间件契约 | 第 10、17 章 |
 | 优先级排序 | 权限检查 HIGH，日志 LOW | 第 10 章 |
 
 ### 1.6 安装型扩展
@@ -312,8 +312,11 @@ Agent 测试比传统软件测试更具挑战性，因为 LLM 输出具有非确
 |------|---------|------|------|
 | 单元测试 | Tool Handler、Memory 操作、Hook 逻辑 | 标准 pytest/unittest，Mock LLM | 每次提交必跑 |
 | 集成测试 | 组件协作、Tool Registry 路由、MCP 通信 | Mock LLM + 真实组件 | 每次合并或发布前 |
+| Keyless transcript replay | 组装后的消息、Tool 轨迹、Observation、用户可见输出 | 真实运行录制结构化夹具，无 Key 确定性回放 | 每次模型可见行为变更必跑并审查快照差异 |
 | 端到端测试 | 完整 Agent 循环、多步任务 | 版本固定的真实模型 + Golden Test | 关键任务、定期运行 |
 | 评估测试 | 输出质量、安全性、成本 | LLM-as-Judge + 人工抽检 | 每次 Prompt、模型或策略变更 |
+
+Keyless replay 位于组件 Mock 与真实模型 E2E 之间：录制时可以使用真实、受控的组装链路，CI 回放时不需要 API Key。夹具应断言结构化行为而非冻结整段开放文本；Tool 描述、Instructions 组装、错误码或用户可见契约变化时，必须在同一变更中更新夹具并审查差异。真实模型 E2E 无 Key 时可以显式跳过，这一层不能随之消失。
 
 ### 6.2 Mock LLM 策略
 
@@ -416,12 +419,8 @@ LLM 评审适合扩展开放性任务的覆盖面，不应成为唯一真值。�
   "task": "只读查询本周订单",
   "allowed_tools": ["orders.search"],
   "forbidden_tools": ["orders.update"],
-  "assertions": {
-    "terminal_status": "completed",
-    "tenant_isolation": true,
-    "max_tool_calls": 3,
-    "approval_bypass": false
-  },
+  "expected_status": "completed",
+  "max_tool_calls": 2,
   "versions": {
     "agent": "2026.07.24",
     "policy": "readonly-v2",
@@ -429,6 +428,8 @@ LLM 评审适合扩展开放性任务的覆盖面，不应成为唯一真值。�
   }
 }
 ```
+
+这个最小执行器只校验终态、允许/禁止 Tool 和调用次数；`tenant_isolation`、`approval_bypass` 等治理断言需要在扩展 schema 后同步实现，不能只写进样本而不执行。
 
 测试执行器应同时读取最终结果和 Trace：前者判断任务交付，后者判断 Tool、权限、预算和恢复不变量。这样可以把“答案碰巧正确但越权访问了数据”判定为失败。
 
@@ -439,6 +440,31 @@ LLM 评审适合扩展开放性任务的覆盖面，不应成为唯一真值。�
 > **来源类型：** Fact + 推导分析 —— OpenTelemetry GenAI 语义约定已覆盖 `invoke_agent`、`execute_tool`、会话标识、Tool Call 和 Token Usage；评估数据集、版本绑定和脱敏策略属于本书的工程建议。
 
 ---
+
+### 6.8 故障注入与设备任务的回归集
+
+任务结果评估和恢复评估应分开。正常完成率很高的 Agent 仍可能在崩溃或重连时重复提交。建议为[第 16 章恢复契约](../16-agent-host/README.md)保留以下硬断言：
+
+| 注入故障 | 必须成立的结果 |
+|----------|----------------|
+| Tool 派发后、结果持久化前退出 | 不把无回执当作未执行；未知副作用不自动重试 |
+| 外部已提交、本地 Checkpoint 丢失 | 只读核对后补回执；外部提交次数保持 1 |
+| 回执保存后、Message 发布前退出 | 重建 UI / Message，不重复调用 Handler |
+| 审批期间目标、Schema 或凭据身份变化 | 旧审批失效，重新检查授权 |
+| 取消后底层请求尚未退出 | 仍保留占用，不启动冲突操作，不把取消当作回滚 |
+| 重启或唤醒触发重复投递 | 同一提交身份被去重，预算不重新获得全额 |
+
+对移动端增加任务前后截图、业务状态和目标包 / 窗口检查。固定应用与系统版本、模型 / Prompt / Tool 修订、权限 Backend、任务种子、网络条件和前置数据；清理必须限定于测试资源。AndroidWorld 的状态奖励信号可作为方法参考，但不得与真实手机任务混为同一评测队列。[AndroidWorld 项目](https://github.com/google-research/android_world)
+
+| 指标 | 定义与报告边界 |
+|------|----------------|
+| 任务成功率 | 通过预先定义的业务状态验证的任务数 / 有效任务数；同时报告分母 |
+| 误操作与重复副作用 | 不允许的状态变化、重复发送 / 写入次数；列明严重性 |
+| 恢复成功率 | 各故障窗口分别统计，不用正常运行样本稀释 |
+| 资源 | 端到端 P50 / P95、模型 / 图像 Token、实际重试和下游调用量 |
+| 人工介入 | 必需审批、澄清与异常接管分开计数；不把减少必要审批当优化 |
+
+比较上下文压缩、Tool Router 或模型路由时使用相同任务集、权限和运行条件，尽量配对相同任务种子；保留失败、超时与安全拒绝样本，并报告样本数和不确定性。仅当安全硬断言满足且成功率没有不可接受的下降时，延迟和成本改善才可视为收益。这个回归集是生产验收建议。AgentHost 离线示例已覆盖本地临时符号链接、别名授权、能力升级、审批预览变化、并行取消和超时后副作用；它尚未执行真实 Provider、外部事务或设备故障注入。
 
 ## 7. 成本优化策略
 
@@ -457,16 +483,31 @@ Agent 的成本来自模型输入/输出 Token、检索与 Tool 的下游计费�
 ### 7.2 模型路由实现
 
 ```python
+from dataclasses import dataclass
+from typing import Literal
+
+
+@dataclass(frozen=True)
+class TaskProfile:
+    """由版本化规则或已评估分类器产生，不能直接信任用户自述。"""
+    complexity: Literal["low", "medium", "high"]
+    context_size: int
+    safety_tier: Literal["normal", "high"] = "normal"
+
+
 class ModelRouter:
-    """根据任务复杂度选择模型"""
-    def select_model(self, task: str, context_size: int) -> str:
-        if context_size < 1000 and "简单" in task:
-            return "economy-model"  # 由部署配置映射为实际模型
-        elif context_size < 8000:
-            return "standard-model"
-        else:
+    """根据结构化任务画像选择部署配置中的模型档位。"""
+    def select_model(self, profile: TaskProfile) -> str:
+        if profile.safety_tier == "high" or profile.complexity == "high":
             return "high-capability-model"
+        if profile.complexity == "low" and profile.context_size < 1000:
+            return "economy-model"  # 由部署配置映射为实际模型
+        if profile.context_size < 8000:
+            return "standard-model"
+        return "high-capability-model"
 ```
+
+`TaskProfile` 的分类规则、版本和评估结果必须进入 Trace；不要根据用户文本中是否出现“简单”等关键词直接路由。路由变更应在固定任务集上验证质量、安全与成本，而不只比较平均价格。
 
 ### 7.3 成本监控
 

@@ -4,6 +4,7 @@
   "private": true,
   "description": "Documentation tooling for Modern AI Agent Architecture",
   "scripts": {
+    "check:baseline": "python scripts/check_book_baseline.py .",
     "check:mermaid": "python scripts/extract_mermaid.py . /tmp/mermaid-snippets && node scripts/check_mermaid.mjs /tmp/mermaid-snippets",
     "check:links": "python scripts/check_internal_links.py ."
   },

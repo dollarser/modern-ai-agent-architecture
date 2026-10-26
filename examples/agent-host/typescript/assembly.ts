@@ -1,133 +1,32 @@
 /** 第 16 章最终组装：可插拔端口与离线最小适配器。 */
 
+import { storeScope, withKeyLock, trackExecution, hasActiveExecution } from "./keyed-lock.js"
+import { atomicWriteText } from "./safe-io.js"
+import { validate } from "./schema-validation.js"
 import { dirname } from "node:path"
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync } from "node:fs"
 import {
   DefaultPolicyEngine, PolicyDecision, type CapabilitySnapshot,
   type PolicyEngine, sha256Text, withSnapshotHash,
 } from "./governance.js"
+import {
+  EventBus, HandoffCoordinator, HookKind, ReviewSubagent,
+  type AgentRunner, type EventBusPort,
+} from "./coordination.js"
+import {
+  InMemoryMemoryBackend, RunState,
+  type MemoryBackend, type MemoryEntry, type PlanStep, type StoredState,
+  type ToolResult, type TraceEntry,
+} from "./runtime-state.js"
+export * from "./coordination.js"
 export * from "./governance.js"
+export * from "./runtime-state.js"
 
-export type ToolResult = {
-  success: boolean
-  error?: string
-  capabilitySnapshot?: CapabilitySnapshot
-  retryable?: boolean
-  attempts?: number
-  skipped?: boolean
-  [key: string]: unknown
-}
-
-export type PlanStep = {
-  id: number
-  description: string
-  tool: string
-  arguments: Record<string, unknown>
-  dependsOn: number[]
-}
-
-export type MemoryEntry = { role: string; content: string }
-export type TraceEntry = { event: string; stepId?: number; [key: string]: unknown }
-
-type StoredState = {
-  runId: string
-  task: string
-  plan: PlanStep[]
-  results: Record<string, ToolResult>
-  memory: MemoryEntry[]
-  trace: TraceEntry[]
-  approvals: Record<string, boolean>
-  stepCount: number
-  attemptCount: number
-  status: string
-  error?: string
-  capabilitySnapshot?: CapabilitySnapshot
-}
-
-export class RunState implements StoredState {
-  results: Record<string, ToolResult> = {}
-  memory: MemoryEntry[] = []
-  trace: TraceEntry[] = []
-  approvals: Record<string, boolean> = {}
-  stepCount = 0
-  attemptCount = 0
-  status = "pending"
-  error?: string
-  capabilitySnapshot?: CapabilitySnapshot
-
-  constructor(
-    public readonly runId: string,
-    public readonly task: string,
-    public plan: PlanStep[],
-  ) {}
-
-  static restore(data: StoredState): RunState {
-    const state = new RunState(data.runId, data.task, data.plan)
-    state.results = data.results
-    state.memory = data.memory
-    state.trace = data.trace
-    state.approvals = data.approvals ?? {}
-    state.stepCount = data.stepCount
-    state.attemptCount = data.attemptCount
-    state.status = data.status
-    state.error = data.error
-    state.capabilitySnapshot = data.capabilitySnapshot
-    return state
-  }
-}
-
-// Memory port
-export interface MemoryBackend {
-  append(runId: string, entry: MemoryEntry): void | Promise<void>
-  recent(runId: string, limit?: number): MemoryEntry[] | Promise<MemoryEntry[]>
-  remember(namespace: string, entry: MemoryEntry): void | Promise<void>
-  search(namespace: string, query: string, limit?: number): MemoryEntry[] | Promise<MemoryEntry[]>
-}
-
-export class InMemoryMemoryBackend implements MemoryBackend {
-  readonly shortTerm = new Map<string, MemoryEntry[]>()
-  readonly longTerm = new Map<string, MemoryEntry[]>()
-
-  append(runId: string, entry: MemoryEntry): void {
-    const entries = this.shortTerm.get(runId) ?? []
-    entries.push(entry)
-    this.shortTerm.set(runId, entries)
-  }
-
-  recent(runId: string, limit = 12): MemoryEntry[] {
-    return [...(this.shortTerm.get(runId) ?? []).slice(-limit)]
-  }
-
-  remember(namespace: string, entry: MemoryEntry): void {
-    const entries = this.longTerm.get(namespace) ?? []
-    if (!entries.some((item) => item.role === entry.role && item.content === entry.content)) {
-      entries.push(entry)
-    }
-    this.longTerm.set(namespace, entries)
-  }
-
-  search(namespace: string, query: string, limit = 5): MemoryEntry[] {
-    const normalized = query.toLowerCase().replaceAll("，", " ")
-    const terms = [
-      ...normalized.split(/\s+/).filter(Boolean),
-      ...Array.from({ length: Math.max(0, normalized.length - 1) }, (_, index) =>
-        normalized.slice(index, index + 2)),
-    ]
-    return (this.longTerm.get(namespace) ?? [])
-      .map((entry, index) => ({
-        entry,
-        index,
-        score: terms.filter((term) => entry.content.toLowerCase().includes(term)).length,
-      }))
-      .filter((item) => item.score > 0)
-      .sort((left, right) => right.score - left.score || left.index - right.index)
-      .slice(0, limit)
-      .map((item) => item.entry)
-  }
-}
+const errorCodes = new Set(["tool_not_found", "invalid_arguments", "policy_denied", "approval_denied",
+  "approval_required", "approval_expired", "handler_error", "provider_timeout", "cancelled",
+  "checkpoint_mismatch", "capability_unsupported", "budget_exceeded", "unknown_side_effect", "runtime_error", "interrupted"])
 
 // Lifecycle hooks
-export enum HookKind { Guard = "guard", Observer = "observer" }
 export type HookCallback = (
   event: string,
   payload: Record<string, unknown>,
@@ -203,6 +102,7 @@ export type Tool = {
   state?: ToolState
   tags?: string[]
   requiresApproval?: boolean
+  implementationVersion?: string
 }
 
 export class ToolRegistry {
@@ -212,6 +112,7 @@ export class ToolRegistry {
   register(tool: Tool, replace = false): void {
     if (this.tools.has(tool.name) && !replace) throw new Error(`Tool 已存在: ${tool.name}`)
     this.tools.set(tool.name, {
+      implementationVersion: "1",
       parameters: {},
       source: ToolSource.Builtin,
       sourceName: "core",
@@ -254,14 +155,14 @@ export class ToolRegistry {
   }
   snapshot(): ToolRegistry {
     const frozen = new ToolRegistry()
-    this.list().forEach((tool) => frozen.register(tool))
+    this.list().forEach((tool) => frozen.register({ ...tool, parameters: structuredClone(tool.parameters) }))
     for (const [alias, target] of this.aliases) frozen.registerAlias(alias, target)
     return frozen
   }
 }
 
 export class ToolRouter {
-  constructor(readonly registry: ToolRegistry) {}
+  constructor(readonly registry: ToolRegistry, readonly executionScope = "") {}
 
   available(tag?: string): Tool[] {
     return this.registry.list().filter(
@@ -296,31 +197,7 @@ export class ToolRouter {
     schema: Record<string, unknown>,
     arguments_: Record<string, unknown>,
   ): void {
-    if (!Object.keys(schema).length) return
-    const required = (schema.required as string[] | undefined) ?? []
-    for (const name of required) {
-      if (!(name in arguments_)) throw new Error(`Tool 参数缺少必填字段: ${name}`)
-    }
-    const properties = (schema.properties as Record<string, Record<string, unknown>> | undefined) ?? {}
-    for (const [name, value] of Object.entries(arguments_)) {
-      const definition = properties[name]
-      if (!definition) {
-        if (schema.additionalProperties === false) throw new Error(`Tool 参数包含未知字段: ${name}`)
-        continue
-      }
-      const expected = definition.type
-      const valid = expected === undefined ||
-        (expected === "string" && typeof value === "string") ||
-        (expected === "number" && typeof value === "number") ||
-        (expected === "integer" && typeof value === "number" && Number.isInteger(value)) ||
-        (expected === "boolean" && typeof value === "boolean") ||
-        (expected === "object" && typeof value === "object" && value !== null && !Array.isArray(value)) ||
-        (expected === "array" && Array.isArray(value))
-      if (!valid) throw new Error(`Tool 参数类型错误: ${name}`)
-      if (Array.isArray(definition.enum) && !definition.enum.includes(value)) {
-        throw new Error(`Tool 参数不在允许值中: ${name}`)
-      }
-    }
+    validate(schema, arguments_)
   }
 }
 
@@ -505,80 +382,6 @@ export class ScriptedApprovalGate implements ApprovalGate {
   }
 }
 
-export interface EventBusPort {
-  publish(topic: string, payload: Record<string, unknown>): Promise<void>
-}
-
-export class EventBus implements EventBusPort {
-  readonly events: Array<Record<string, unknown>> = []
-  private readonly subscribers = new Map<string, Array<{
-    callback: (event: Record<string, unknown>) => void | Promise<void>
-    kind: HookKind
-    name: string
-  }>>()
-  subscribe(
-    topic: string,
-    callback: (event: Record<string, unknown>) => void | Promise<void>,
-    kind = HookKind.Observer,
-    name = "anonymous",
-  ): void {
-    const callbacks = this.subscribers.get(topic) ?? []
-    callbacks.push({ callback, kind, name })
-    this.subscribers.set(topic, callbacks)
-  }
-  async publish(topic: string, payload: Record<string, unknown>): Promise<void> {
-    const event = { topic, ...payload }
-    this.events.push(event)
-    for (const subscriber of this.subscribers.get(topic) ?? []) {
-      try { await subscriber.callback(event) } catch (error) {
-        if (subscriber.kind === HookKind.Guard) throw error
-        this.events.push({
-          topic: "observer.error", subscriber: subscriber.name, error: String(error),
-        })
-      }
-    }
-  }
-}
-
-export type HandoffRequest = {
-  task: string
-  parentRunId: string
-  parentTraceId: string
-  parentSpanId: string
-  depth: number
-}
-export interface AgentRunner { runTask(request: HandoffRequest): ToolResult | Promise<ToolResult> }
-export class ReviewSubagent implements AgentRunner {
-  runTask(request: HandoffRequest): ToolResult {
-    return {
-      success: true,
-      review: "子 Agent 已验证候选路径与变更说明",
-      parentTraceId: request.parentTraceId,
-      parentSpanId: request.parentSpanId,
-    }
-  }
-}
-export class HandoffCoordinator {
-  constructor(
-    readonly runner: AgentRunner,
-    readonly events: EventBusPort,
-    readonly maxDepth = 2,
-  ) {}
-  async handoff(request: HandoffRequest): Promise<ToolResult> {
-    if (request.depth > this.maxDepth) return { success: false, error: "Handoff 超过最大深度" }
-    await this.events.publish("handoff.created", {
-      runId: request.parentRunId,
-      traceId: request.parentTraceId,
-    })
-    const result = await this.runner.runTask(request)
-    await this.events.publish("handoff.completed", {
-      runId: request.parentRunId,
-      success: result.success,
-    })
-    return result
-  }
-}
-
 // Runtime ports and execution
 export interface LLMAdapter {
   createPlan(task: string, toolNames: string[], context: string[]): Promise<PlanStep[]>
@@ -589,7 +392,7 @@ export class DeterministicLLMAdapter implements LLMAdapter {
   async createPlan(task: string, toolNames: string[], context: string[]): Promise<PlanStep[]> {
     this.lastContext = [...context]
     const required = [
-      "search_catalog", "inspect_candidate", "summarize_matches",
+      "search_catalog", "catalog-server.search_catalog", "inspect_candidate", "summarize_matches",
       "propose_change", "delegate_review", "compose_report",
     ]
     const missing = required.filter((name) => !toolNames.includes(name))
@@ -622,9 +425,7 @@ export class JsonCheckpointStore implements CheckpointStore {
   save(state: RunState): void {
     const data = this.readAll()
     data[state.runId] = state
-    const temporary = `${this.path}.tmp`
-    writeFileSync(temporary, JSON.stringify(data, null, 2), "utf8")
-    renameSync(temporary, this.path)
+    atomicWriteText(this.path, JSON.stringify(data, null, 2))
   }
   load(runId: string): RunState | undefined {
     const item = this.readAll()[runId]
@@ -648,12 +449,14 @@ const defaultConfig = (): AgentConfig => ({
   stepTimeoutMs: 2_000,
   retryDelayMs: 10,
   allowedTools: new Set([
-    "search_catalog", "inspect_candidate", "summarize_matches",
+    "search_catalog", "catalog-server.search_catalog", "inspect_candidate", "summarize_matches",
     "propose_change", "delegate_review", "compose_report",
   ]),
 })
 const delay = (milliseconds: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, milliseconds))
+
+class ExecutionTimeout extends Error {}
 
 class DependencyExecutor {
   constructor(
@@ -708,23 +511,29 @@ class DependencyExecutor {
       if (this.config.interruptAfterSteps !== undefined) {
         batch = batch.slice(0, this.config.interruptAfterSteps - (state.stepCount - startedAt))
       }
-      const results = await Promise.all(
-        batch.map((step) => this.executeStep(step, state, checkpoint)),
-      )
-      for (const [index, step] of batch.entries()) {
-        state.results[String(step.id)] = results[index]
+      // 每步独立提交；等待全部任务收尾，避免兄弟步骤在 Run 返回后丢失结果。
+      const settled = await Promise.allSettled(batch.map(async (step) => {
+        const result = await this.executeStep(step, state, checkpoint)
+        state.results[String(step.id)] = result
+        delete state.executions[String(step.id)]
         state.stepCount += 1
-        state.memory.push({
+        const entry = {
           role: "tool",
-          content: JSON.stringify({ stepId: step.id, tool: step.tool, result: results[index] }),
-        })
-        await this.memory.append(state.runId, state.memory[state.memory.length - 1])
-      }
-      await checkpoint()
+          content: JSON.stringify({ stepId: step.id, tool: step.tool, result }),
+        }
+        state.memory.push(entry)
+        await checkpoint()
+        await this.memory.append(state.runId, entry)
+      }))
+      const rejected = settled.find((item) => item.status === "rejected")
+      if (rejected?.status === "rejected") throw rejected.reason
+
     }
     const failure = Object.values(state.results).find((result) => !result.success)
-    state.status = failure ? "failed" : "completed"
-    state.error = failure ? String(failure.error ?? "Tool 执行失败") : undefined
+    state.status = Object.values(state.results).some((result) => result.outcome_unknown)
+      ? "reconciliation_required" : failure ? "failed" : "completed"
+    state.error = state.status === "reconciliation_required" ? "execution_outcome_unknown"
+      : failure ? String(failure.error ?? "Tool 执行失败") : undefined
     await checkpoint()
   }
 
@@ -741,12 +550,15 @@ class DependencyExecutor {
       traceId: `trace-${state.runId}`,
       spanId: `step-${step.id}`,
     }
+    let arguments_: Record<string, unknown>
     try {
       await this.hooks.emit("before_tool", payload, state)
+      arguments_ = structuredClone(step.arguments)
       const tool = this.router.resolve(step.tool)
+      validate(tool.parameters ?? {}, arguments_)
       const decision = this.policy.evaluate({
-        subject: "agent", capability: step.tool, arguments: step.arguments,
-        resource: step.tool, runId: state.runId,
+        subject: "agent", capability: tool.name, arguments: structuredClone(arguments_),
+        resource: tool.name, invokedAs: step.tool, runId: state.runId,
         source: `${tool.source}:${tool.sourceName}`,
         risk: tool.requiresApproval ? "high" : "normal",
       })
@@ -754,27 +566,22 @@ class DependencyExecutor {
         event: "policy_decision", tool: step.tool,
         decision, policyVersion: this.policy.version,
       })
-      if (decision === PolicyDecision.Deny) throw new Error(`Policy 拒绝 Tool: ${step.tool}`)
+      if (decision === PolicyDecision.Deny) return { success: false, error: `Policy 拒绝 Tool: ${step.tool}`, error_code: "policy_denied" }
       if (decision === PolicyDecision.Ask) {
-        const approvalId = `${state.runId}:${step.id}:${step.tool}:${this.snapshotHash}`
+        const preview = {
+          task: state.task, tool: tool.name, arguments: structuredClone(arguments_),
+          dependencyResults: Object.fromEntries(
+            step.dependsOn.map((id) => [String(id), state.results[String(id)]]),
+          ),
+          ...(tool.prepare?.(structuredClone(arguments_), context) ?? {}),
+        }
+        const intentHash = sha256Text(JSON.stringify({ arguments: arguments_, preview }))
+        const approvalId = `${state.runId}:${step.id}:${tool.name}:${this.snapshotHash}:${intentHash}`
         if (state.approvals[approvalId] === undefined) {
           const request: ApprovalRequest = {
-            id: approvalId,
-            runId: state.runId,
-            tool: step.tool,
-            arguments: step.arguments,
-            reason: "Tool 声明 requiresApproval",
-            preview: {
-              task: state.task,
-              tool: step.tool,
-              arguments: step.arguments,
-              dependencyResults: Object.fromEntries(
-                step.dependsOn.map((id) => [String(id), state.results[String(id)]]),
-              ),
-              ...(tool.prepare?.(step.arguments, context) ?? {}),
-            },
-            risk: "high",
-            idempotencyKey: approvalId,
+            id: approvalId, runId: state.runId, tool: tool.name,
+            arguments: structuredClone(arguments_), reason: "Policy 请求审批",
+            preview: structuredClone(preview), risk: "high", idempotencyKey: approvalId,
           }
           await this.hooks.emit("before_approval", { ...payload, request: request.id }, state)
           state.approvals[approvalId] = await this.approval.decide(request)
@@ -785,26 +592,31 @@ class DependencyExecutor {
           await checkpoint()
         }
         if (!state.approvals[approvalId]) {
-          const result = { success: false, error: `审批拒绝执行: ${step.tool}` }
-          await this.hooks.emit("on_tool_error", { ...payload, result }, state)
-          await this.hooks.emit("after_tool", { ...payload, result }, state)
+          const result = { success: false, error: `审批拒绝执行: ${step.tool}`, error_code: "approval_denied" }
+          await this.hooks.emit("on_approval_rejected", { ...payload, result }, state)
           return result
         }
       }
     } catch (error) {
-      const result = { success: false, error: `Guardrail 拒绝执行: ${String(error)}` }
+      const result = { success: false, error: `Tool 调用管线失败: ${String(error)}`,
+        error_code: error instanceof Error && /Tool 参数|Schema/.test(error.message) ? "invalid_arguments"
+          : error instanceof Error && error.message.includes("Tool 未注册") ? "tool_not_found" : "runtime_error" }
       await this.hooks.emit("on_tool_error", { ...payload, result }, state)
       await this.hooks.emit("after_tool", { ...payload, result }, state)
       return result
     }
 
+    state.executions[String(step.id)] = "started"
+    await checkpoint()
     let lastError = "Tool 执行失败"
     let attempt = 0
     for (attempt = 1; attempt <= this.config.maxRetries + 1; attempt += 1) {
       state.attemptCount += 1
       try {
+        const execution = this.router.execute(step.tool, structuredClone(arguments_), context)
+        trackExecution(this.router.executionScope, state.runId, execution)
         const result = await this.withTimeout(
-          this.router.execute(step.tool, step.arguments, context),
+          execution,
           `Tool '${step.tool}' 超时`,
         )
         const withAttempts = { ...result, attempts: attempt }
@@ -815,6 +627,14 @@ class DependencyExecutor {
         lastError = String(withAttempts.error ?? lastError)
         if (!withAttempts.retryable) break
       } catch (error) {
+        if (error instanceof ExecutionTimeout) {
+          const result = { success: false, error: "execution_outcome_unknown",
+            outcome_unknown: true, retryable: false, attempts: attempt }
+          await this.hooks.emit("on_tool_error", { ...payload, result }, state)
+          await this.hooks.emit("after_tool", { ...payload, result }, state)
+          return result
+        }
+        if (error instanceof Error && error.name === "AbortError") throw error
         lastError = String(error)
         break
       }
@@ -828,7 +648,7 @@ class DependencyExecutor {
 
   private withTimeout<T>(promise: Promise<T>, message: string): Promise<T> {
     return new Promise<T>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(message)), this.config.stepTimeoutMs)
+      const timer = setTimeout(() => reject(new ExecutionTimeout(message)), this.config.stepTimeoutMs)
       promise.then(
         (value) => { clearTimeout(timer); resolve(value) },
         (error: unknown) => { clearTimeout(timer); reject(error) },
@@ -861,6 +681,10 @@ export type AgentResult = {
   attempts: number
   results: Record<string, ToolResult>
   final: string
+  error_code?: string
+  error_message?: string
+  retryable?: boolean
+  details?: Record<string, unknown>
   error?: string
   trace: TraceEntry[]
   elapsedMs: number
@@ -931,6 +755,38 @@ export class AgentHost {
   }
 
   async run(task: string, runId: string, conversationContext: string[] = []): Promise<AgentResult> {
+    return withKeyLock(storeScope(this.checkpoints), runId,
+      () => this.runGuarded(task, runId, conversationContext))
+  }
+
+  async reconcile(
+    runId: string, stepId: number,
+    verify: (state: RunState, step: PlanStep) => { evidence: string; result: ToolResult } |
+      Promise<{ evidence: string; result: ToolResult }>,
+  ): Promise<RunState> {
+    return withKeyLock(storeScope(this.checkpoints), runId, async () => {
+      if (hasActiveExecution(storeScope(this.checkpoints), runId)) throw new Error("execution_still_active")
+      const state = await this.checkpoints.load(runId)
+      if (!state) throw new Error("Run 不存在")
+      if (!state.executions[String(stepId)] && !state.results[String(stepId)]?.outcome_unknown) throw new Error("step_not_unknown")
+      const step = state.plan.find((item) => item.id === stepId)
+      if (!step) throw new Error("Step 不存在")
+      const receipt = await verify(RunState.restore(structuredClone(state)), structuredClone(step))
+      if (typeof receipt.evidence !== "string" || !receipt.evidence.trim() || !receipt.result ||
+        typeof receipt.result.success !== "boolean" || receipt.result.outcome_unknown || receipt.result.retryable) {
+        throw new Error("invalid_reconciliation_receipt")
+      }
+      if (!state.results[String(stepId)]) state.stepCount += 1
+      state.results[String(stepId)] = { ...structuredClone(receipt.result), retryable: false }
+      delete state.executions[String(stepId)]
+      state.trace.push({ event: "execution_reconciled", stepId, evidence: receipt.evidence })
+      state.status = "interrupted"; state.error = undefined
+      await this.checkpoints.save(state)
+      return state
+    })
+  }
+
+  private async runGuarded(task: string, runId: string, conversationContext: string[]): Promise<AgentResult> {
     const started = performance.now()
     try {
       return await this.runInternal(task, runId, started, conversationContext)
@@ -941,6 +797,10 @@ export class AgentHost {
         state = await this.checkpoints.load(runId) ?? new RunState(runId, task, [])
       } catch {
         state = new RunState(runId, task, [])
+      }
+      if (state.status === "completed" && state.finalAnswer !== undefined) {
+        state.trace.push({ event: "delivery_error", error: String(error) })
+        return this.result(state, state.finalAnswer, false, started)
       }
       state.status = "failed"
       state.error = `runtime_error: ${String(error)}`
@@ -1017,6 +877,10 @@ export class AgentHost {
       tools: this.tools.list().map((tool) => ({
         name: tool.name, schema: tool.parameters,
         source: tool.source, sourceName: tool.sourceName,
+        implementationVersion: tool.implementationVersion,
+        handlerDigest: sha256Text(tool.handler.toString()),
+        prepareDigest: sha256Text(tool.prepare?.toString() ?? ""),
+        requiresApproval: tool.requiresApproval, state: tool.state,
       })),
       toolAliases: this.tools.listAliases(),
       skills: this.skills.list().map((skill) => ({
@@ -1024,9 +888,10 @@ export class AgentHost {
         checksum: sha256Text(skill.instructions),
       })),
       policyVersion: this.policy.version,
+      policy: this.policy instanceof DefaultPolicyEngine ? this.policy.snapshot() : {},
       config: { allowedTools: [...this.config.allowedTools].sort() },
     }
-    return withSnapshotHash(body)
+    return withSnapshotHash(structuredClone(body))
   }
 
   private async runInternal(
@@ -1037,7 +902,7 @@ export class AgentHost {
   ): Promise<AgentResult> {
     await this.initializeExtensions()
     const currentSnapshot = this.capabilitySnapshot()
-    const runRouter = new ToolRouter(this.tools.snapshot())
+    const runRouter = new ToolRouter(this.tools.snapshot(), storeScope(this.checkpoints))
     if (!this.memoryInitialized && this.initialMemory) {
       await this.memory.remember("default", this.initialMemory)
       this.memoryInitialized = true
@@ -1050,14 +915,20 @@ export class AgentHost {
       return this.result(mismatch, "同一 runId 不能恢复为不同任务", false, started)
     }
     if (
-      restored?.capabilitySnapshot &&
-      restored.capabilitySnapshot.snapshotHash !== currentSnapshot.snapshotHash
+      restored &&
+      restored.capabilitySnapshot?.snapshotHash !== currentSnapshot.snapshotHash
     ) {
       const mismatch = new RunState(runId, task, [])
       mismatch.status = "failed"
       mismatch.error = "capability_snapshot_mismatch"
       mismatch.capabilitySnapshot = currentSnapshot
       return this.result(mismatch, mismatch.error, false, started)
+    }
+    if (restored && (Object.keys(restored.executions).length ||
+      Object.values(restored.results).some((result) => result.outcome_unknown))) {
+      restored.status = "reconciliation_required"
+      restored.error = "execution_outcome_unknown"
+      return this.result(restored, "执行结果未知，核对副作用后再创建新 Run", true, started)
     }
     let state: RunState
     let resumed = false
@@ -1076,9 +947,11 @@ export class AgentHost {
       }
       resumed = state.status !== "completed"
       if (state.status === "completed") {
-        return this.result(
-          state, await this.llm.finalAnswer(task, state.results), false, started, true,
-        )
+        if (state.finalAnswer === undefined) {
+          state.finalAnswer = await this.llm.finalAnswer(task, state.results)
+          await this.checkpoints.save(state)
+        }
+        return this.result(state, state.finalAnswer, false, started, true)
       }
       await this.hooks.emit("before_run", { task, resumed: true }, state)
       await this.hooks.emit("on_resume", { status: state.status }, state)
@@ -1111,14 +984,27 @@ export class AgentHost {
       await this.recordMemory(state, "user", task)
       await this.checkpoints.save(state)
     }
+    let saves = Promise.resolve()
+    const checkpoint = (): Promise<void> => {
+      const snapshot = RunState.restore(structuredClone(state))
+      const next = saves.then(() => this.checkpoints.save(snapshot))
+      saves = next.then(() => undefined, () => undefined)
+      return next
+    }
     await new DependencyExecutor(
       runRouter, this.hooks, this.approval, this.memory, this.config,
       this.policy, currentSnapshot.snapshotHash,
     )
-      .run(state, () => this.checkpoints.save(state))
-    const final = state.status === "completed"
-      ? await this.llm.finalAnswer(task, state.results)
-      : state.error ?? "任务未完成"
+      .run(state, checkpoint)
+    let final: string
+    if (state.status === "completed") {
+      state.status = "finalizing"
+      await checkpoint()
+      final = await this.llm.finalAnswer(task, state.results)
+      state.finalAnswer = final
+      state.status = "completed"
+      await checkpoint()
+    } else final = state.error ?? "任务未完成"
     await this.recordMemory(
       state, state.status === "completed" ? "assistant" : "system", final,
     )
@@ -1136,8 +1022,15 @@ export class AgentHost {
     started: number,
     replayed = false,
   ): AgentResult {
+    const success = state.status === "completed"
+    const errorCode = success ? undefined
+      : (["run_task_mismatch", "capability_snapshot_mismatch"].includes(state.error ?? "")
+        ? "checkpoint_mismatch" : state.error === "execution_outcome_unknown"
+          ? "unknown_side_effect" : String(Object.values(state.results).find((result) => !result.success && errorCodes.has(String(result.error_code)))?.error_code ??
+            (state.error?.startsWith("runtime_error:") ? "runtime_error" : state.status === "max_steps"
+              ? "budget_exceeded" : state.status === "interrupted" ? "interrupted" : "handler_error")))
     return {
-      success: state.status === "completed",
+      success,
       status: state.status,
       runId: state.runId,
       resumed,
@@ -1146,6 +1039,11 @@ export class AgentHost {
       attempts: state.attemptCount,
       results: state.results,
       final,
+      error_code: errorCode,
+      error_message: success ? undefined : final,
+      retryable: false,
+      details: success ? {} : { reason: state.error ?? errorCode },
+      // 兼容早期教学调用方；跨边界代码应读取 error_code/details。
       error: state.error,
       trace: state.trace,
       elapsedMs: Math.round((performance.now() - started) * 100) / 100,

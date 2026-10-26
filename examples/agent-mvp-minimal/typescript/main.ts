@@ -40,13 +40,19 @@ class ToolDispatcher {
 
   execute(call: ToolCall, state: TaskState): JsonObject {
     const handler = this.handlers.get(call.name)
-    return handler ? handler(call.arguments, state) : { ok: false, error: `unknown tool: ${call.name}` }
+    return handler ? handler(call.arguments, state) : {
+      success: false,
+      error_code: "tool_not_found",
+      error_message: `unknown tool: ${call.name}`,
+      retryable: false,
+      details: { tool: call.name },
+    }
   }
 
   private searchCatalog(arguments_: JsonObject): JsonObject {
     const query = String(arguments_.query)
     return {
-      ok: true,
+      success: true,
       matches: [
         { path: "src/config.ts", snippet: `connection settings for: ${query}` },
         { path: "src/db.ts", snippet: "createConnection(config)" },
@@ -57,7 +63,7 @@ class ToolDispatcher {
   private summarizeObservation(_: JsonObject, state: TaskState): JsonObject {
     const previous = state.observations.at(-1) ?? { matches: [] }
     const matches = Array.isArray(previous.matches) ? previous.matches : []
-    return { ok: true, summary: `找到 ${matches.length} 条候选信息，等待用户确认下一步。` }
+    return { success: true, summary: `找到 ${matches.length} 条候选信息，等待用户确认下一步。` }
   }
 }
 
@@ -91,8 +97,8 @@ class MinimalAgent {
       const observation = this.tools.execute(call, state)
       state.observations.push(observation)
       console.log(`observe: ${JSON.stringify(observation)}`)
-      if (observation.ok !== true) {
-        state.error = String(observation.error ?? "tool execution failed")
+      if (observation.success !== true) {
+        state.error = String(observation.error_message ?? "tool execution failed")
         break
       }
     }
